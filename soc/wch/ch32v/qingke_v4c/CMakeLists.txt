@@ -1,10 +1,5 @@
-# Copyright (c) 2024 Michael Hope
-# Copyright (c) 2024 Jianxiong Gu
-# SPDX-License-Identifier: Apache-2.0
-
-zephyr_sources(
-  soc_irq.S
-  vector.S
-)
-
 zephyr_include_directories(.)
+
+zephyr_sources(soc.c vector.S)
+
+set(SOC_LINKER_SCRIPT ${ZEPHYR_BASE}/include/zephyr/arch/riscv/common/linker.ld CACHE INTERNAL "")
