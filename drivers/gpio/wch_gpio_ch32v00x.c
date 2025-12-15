@@ -144,9 +144,11 @@ static int gpio_ch32v00x_configure_exti(const struct device *dev, gpio_pin_t pin
 	case DT_REG_ADDR(DT_NODELABEL(gpioc)):
 		port_id = 2;
 		break;
+#if DT_NODE_EXISTS(DT_NODELABEL(gpiod))
 	case DT_REG_ADDR(DT_NODELABEL(gpiod)):
 		port_id = 3;
 		break;
+#endif
 #if DT_NODE_EXISTS(DT_NODELABEL(gpioe))
 	case DT_REG_ADDR(DT_NODELABEL(gpioe)):
 		port_id = 4;
