@@ -1,0 +1,8 @@
+# Copyright (c) 2025 MASSDRIVER EI (massdriver.space)
+# SPDX-License-Identifier: Apache-2.0
+
+board:
+  name: ch32x035_evt
+  vendor: wch
+  socs:
+    - name: ch32x035

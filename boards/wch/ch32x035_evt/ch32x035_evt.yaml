@@ -1,0 +1,14 @@
+identifier: ch32x035_evt
+name: WCH CH32X035 Evaluation Board
+type: mcu
+arch: riscv
+toolchain:
+  - cross-compile
+  - zephyr
+ram: 20
+flash: 62
+supported:
+  - gpio
+  - usb
+  - adc
+  - dma

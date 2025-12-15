@@ -1,0 +1,6 @@
+tests:
+  drivers.tcpc.ch32x035:
+    tags: drivers tcpc
+    platform_allow: ch32x035_evt
+    integration_platforms:
+      - ch32x035_evt

@@ -1,0 +1,80 @@
+/*
+ * Copyright (c) 2025 MASSDRIVER EI (massdriver.space)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <wch/ch32x035/ch32x035.dtsi>
+
+/ {
+	model = "WCH CH32X035 EVT";
+	compatible = "wch,ch32x035-evt";
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,console = &usart1;
+		zephyr,shell-uart = &usart1;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		/* Assuming LED on PA0 for now, check schematic if needed */
+		led0: led_0 {
+			gpios = <&gpioa 0 0>;
+			label = "User LED1";
+		};
+	};
+};
+
+&afio {
+	adc_default: adc_default {
+		/* Dummy configuration for build */
+	};
+};
+
+&usart1 {
+	status = "okay";
+	current-speed = <115200>;
+};
+
+&gpioa {
+	status = "okay";
+};
+
+&gpiob {
+	status = "okay";
+};
+
+&gpioc {
+	status = "okay";
+};
+
+&dma1 {
+	status = "okay";
+};
+
+
+&adc1 {
+	status = "okay";
+	pinctrl-0 = <&adc_default>;
+	pinctrl-names = "default";
+};
+
+
+&afio {
+	usbpd_default: usbpd_default {
+		group1 {
+			pinmux = <0x0000020E>, <0x0000020F>; /* PC14, PC15 */
+		};
+	};
+};
+
+&usbpd {
+	status = "okay";
+	pinctrl-0 = <&usbpd_default>;
+	pinctrl-names = "default";
+};
+
