@@ -1,0 +1,12 @@
+# Copyright (c) 2025 MASSDRIVER EI (massdriver.space)
+# SPDX-License-Identifier: Apache-2.0
+
+config CLOCK_CONTROL_CH32X035
+	bool "WCH CH32X035 clock control driver"
+	default y
+	depends on DT_HAS_WCH_CH32X035_RCC_ENABLED
+	help
+	  Enable clock control for WCH CH32X035 microcontrollers.
+	  The CH32X035 uses a fixed 48MHz internal HSI oscillator
+	  with no PLL. This driver enables/disables peripheral clocks
+	  on the AHB, APB1, and APB2 buses.

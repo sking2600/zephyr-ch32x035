@@ -1,0 +1,24 @@
+# Copyright (c) 2025 MASSDRIVER EI (massdriver.space)
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH CH32X035 Reset and Clock Control (RCC)
+
+compatible: "wch,ch32x035-rcc"
+
+include: [clock-controller.yaml, base.yaml]
+
+properties:
+  reg:
+    required: true
+
+  "#clock-cells":
+    const: 1
+    description: |
+      Clock ID encoding: (bus_index << 5) | bit_position
+      - bus_index 0 = AHB (AHBPCENR register)
+      - bus_index 1 = APB2 (APB2PCENR register)
+      - bus_index 2 = APB1 (APB1PCENR register)
+      See dt-bindings/clock/ch32x035_clock.h for predefined clock IDs.
+
+clock-cells:
+  - id
