@@ -42,6 +42,7 @@ source "drivers/mfd/Kconfig.pca9422"
 source "drivers/mfd/Kconfig.pf1550"
 source "drivers/mfd/Kconfig.rv3032_mfd"
 source "drivers/mfd/Kconfig.tle9104"
+source "drivers/mfd/Kconfig.wch_opacmp"
 # zephyr-keep-sorted-stop
 
 endif # MFD

@@ -1,0 +1,44 @@
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH OPA/CMP Multi-function Device
+
+compatible: "wch,opacmp"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true
+
+
+child-binding:
+  description: OPA or CMP sub-units
+  properties:
+    compatible:
+      type: string
+      required: true
+      enum:
+        - "wch,opa"
+        - "wch,cmp"
+
+    index:
+      type: int
+      required: true
+      description: Unit index (e.g. 1 for OPA1)
+
+    wch,psel:
+      type: int
+      description: Positive input selection (PSEL)
+
+    wch,nsel:
+      type: int
+      description: Negative input selection (NSEL)
+
+    wch,mode:
+      type: int
+      description: Output mode configuration
+
+    wch,hyen:
+      type: int
+      description: Hysteresis enable for comparator

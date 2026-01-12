@@ -70,3 +70,34 @@ zephyr_udc0: &usbfs {
     pinctrl-0 = <&usbpd_default>;
     pinctrl-names = "default";
 };
+
+&adc1 {
+    status = "okay";
+    pinctrl-0 = <&adc1_default>;
+    pinctrl-names = "default";
+};
+
+&spi1 {
+    status = "okay";
+    pinctrl-0 = <&spi1_default>;
+    pinctrl-names = "default";
+};
+
+&i2c1 {
+    status = "okay";
+    pinctrl-0 = <&i2c1_default>;
+    pinctrl-names = "default";
+    clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+&opacmp {
+	status = "okay";
+};
+
+&opa1 {
+	status = "okay";
+};
+
+&cmp1 {
+	status = "okay";
+};

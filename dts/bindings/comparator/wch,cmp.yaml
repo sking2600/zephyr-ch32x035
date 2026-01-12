@@ -1,0 +1,14 @@
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH CMP (Comparator) sub-unit
+
+compatible: "wch,cmp"
+
+include: [base.yaml]
+
+properties:
+  index:
+    type: int
+    required: true
+    description: CMP unit index (1, 2, or 3 typically)

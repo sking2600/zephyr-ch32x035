@@ -195,12 +195,16 @@
             status = "disabled";
         };
 
-        opa: opa@40026000 {
-            compatible = "wch,opa";
+        opacmp: opacmp@40026000 {
+            compatible = "wch,opacmp";
             reg = <0x40026000 0x400>;
-            interrupts = <48>;
-            interrupt-parent = <&pfic>;
             status = "disabled";
+
+            opa1: opa1 {
+                compatible = "wch,opa";
+                index = <1>;
+                status = "disabled";
+            };
         };
 
         awu: awu@40026400 {

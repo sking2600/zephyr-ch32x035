@@ -1,0 +1,9 @@
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+config MFD_WCH_OPACMP
+	bool "WCH OPA/CMP MFD driver"
+	default y
+	depends on DT_HAS_WCH_OPACMP_ENABLED
+	help
+	  Enable the WCH OPA/CMP (Op-Amp and Comparator) MFD driver.

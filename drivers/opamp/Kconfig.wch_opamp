@@ -1,0 +1,8 @@
+# WCH OPA driver configuration options
+
+config OPAMP_WCH
+	bool "WCH Operational Amplifier (OPA) driver"
+	default y
+	depends on DT_HAS_WCH_OPA_ENABLED
+	help
+	  Enable the WCH OPA driver.

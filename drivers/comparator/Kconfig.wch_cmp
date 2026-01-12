@@ -1,0 +1,8 @@
+# WCH Comparator driver configuration options
+
+config COMPARATOR_WCH
+	bool "WCH Comparator driver"
+	default y
+	depends on DT_HAS_WCH_CMP_ENABLED
+	help
+	  Enable the WCH Comparator driver.

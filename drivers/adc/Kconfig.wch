@@ -1,0 +1,15 @@
+# Copyright (c) Michael Hope <michaelh@juju.nz>
+# SPDX-License-Identifier: Apache-2.0
+
+config ADC_WCH
+	bool "WCH ADC Driver"
+	default y
+	depends on DT_HAS_WCH_ADC_ENABLED
+	help
+	  Enable the WCH family Analog-to-Digital Converter (ADC) driver.
+
+config ADC_WCH_DMA
+	bool "WCH ADC DMA support"
+	depends on ADC_WCH && DMA
+	help
+	  Enable DMA support for the WCH ADC driver.

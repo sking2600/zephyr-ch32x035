@@ -284,6 +284,38 @@
 			interrupts = <34>;
 			status = "disabled";
 			#io-channel-cells = <1>;
+			dmas = <&dma1 0>;
+			dma-names = "adc";
+		};
+
+		opacmp: opacmp@40026000 {
+			compatible = "wch,opacmp";
+			reg = <0x40026000 0x400>;
+			status = "disabled";
+
+			opa1: opa1 {
+				compatible = "wch,opa";
+				index = <1>;
+				status = "disabled";
+			};
+
+			cmp1: cmp1 {
+				compatible = "wch,cmp";
+				index = <1>;
+				status = "disabled";
+			};
+
+			cmp2: cmp2 {
+				compatible = "wch,cmp";
+				index = <2>;
+				status = "disabled";
+			};
+
+			cmp3: cmp3 {
+				compatible = "wch,cmp";
+				index = <3>;
+				status = "disabled";
+			};
 		};
 
 		wwdg: watchdog@40002c00 {

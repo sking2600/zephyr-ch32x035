@@ -110,6 +110,14 @@ static void clock_control_wch_rcc_setup_flash(void)
 	} else {
 		latency = FLASH_ACTLR_LATENCY_2;
 	}
+#elif defined(CONFIG_SOC_CH32L103)
+	if (WCH_RCC_SYSCLK <= 36000000) {
+		latency = FLASH_ACTLR_LATENCY_0;
+	} else if (WCH_RCC_SYSCLK <= 72000000) {
+		latency = FLASH_ACTLR_LATENCY_1;
+	} else {
+		latency = FLASH_ACTLR_LATENCY_2;
+	}
 #else
 #error Unrecognised SOC family
 #endif

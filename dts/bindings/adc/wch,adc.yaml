@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Michael Hope <michaelh@juju.nz>
 # SPDX-License-Identifier: Apache-2.0
 
-description: WCH CH32V00x ADC
+description: WCH ADC
 
 compatible: "wch,adc"
 
@@ -31,6 +31,12 @@ properties:
 
   "#io-channel-cells":
     const: 1
+
+  dmas:
+    description: DMA channels for ADC data transfer
+
+  dma-names:
+    description: DMA channel names
 
 io-channel-cells:
   - input
