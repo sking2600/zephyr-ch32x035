@@ -7,29 +7,33 @@
 /dts-v1/;
 
 #include <wch/ch32x035/ch32x035.dtsi>
+#include <zephyr/dt-bindings/pinctrl/ch32x035_pinctrl.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
 
 / {
 	model = "WCH CH32X035 EVT";
 	compatible = "wch,ch32x035-evt";
 
-	chosen {
-		zephyr,sram = &sram0;
-		zephyr,flash = &flash0;
-		zephyr,console = &usart1;
-		zephyr,shell-uart = &usart1;
+	aliases {
+		led0 = &led0;
 	};
 
 	leds {
 		compatible = "gpio-leds";
-		/* Assuming LED on PA0 for now, check schematic if needed */
 		led0: led_0 {
-			gpios = <&gpioa 0 0>;
+			gpios = <&gpioa 0 GPIO_ACTIVE_LOW>;
 			label = "User LED1";
 		};
 	};
 };
 
 &afio {
+	usart1_default: usart1_default {
+		group1 {
+			pinmux = <PA9>, <PA10>;
+		};
+	};
+
 	adc_default: adc_default {
 		/* Dummy configuration for build */
 	};
@@ -38,6 +42,8 @@
 &usart1 {
 	status = "okay";
 	current-speed = <115200>;
+	pinctrl-0 = <&usart1_default>;
+	pinctrl-names = "default";
 };
 
 &gpioa {
@@ -70,6 +76,18 @@
 			pinmux = <0x0000020E>, <0x0000020F>; /* PC14, PC15 */
 		};
 	};
+
+	usbfs_default: usbfs_default {
+		group1 {
+			pinmux = <PA11>, <PA12>;
+		};
+	};
+};
+
+zephyr_udc0: &usbfs {
+	status = "okay";
+	pinctrl-0 = <&usbfs_default>;
+	pinctrl-names = "default";
 };
 
 &usbpd {

@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+if SOC_CH32L103
+
+config SOC
+	default "ch32l103"
+
+config SYS_CLOCK_HW_CYCLES_PER_SEC
+	default 72000000
+
+config NUM_IRQS
+	default 82
+
+config VECTOR_TABLE_SIZE
+	default 82
+
+config FLASH_SIZE
+	default 64
+
+config FLASH_BASE_ADDRESS
+	default 0x08000000
+
+config SRAM_SIZE
+	default 20
+
+config SRAM_BASE_ADDRESS
+	default 0x20000000
+
+endif # SOC_CH32L103

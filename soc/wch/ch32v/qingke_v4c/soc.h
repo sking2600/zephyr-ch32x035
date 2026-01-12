@@ -1,26 +1,17 @@
-#ifndef SOC_H
-#define SOC_H
+#ifndef ZEPHYR_SOC_WCH_CH32V_QINGKE_V4C_SOC_H_
+#define ZEPHYR_SOC_WCH_CH32V_QINGKE_V4C_SOC_H_
 
 #ifndef _ASMLANGUAGE
+#if defined(CONFIG_SOC_CH32X035)
 #include <ch32x035.h>
-#include <ch32x035_adc.h>
-#include <ch32x035_dma.h>
-#include <ch32x035_gpio.h>
-#include <ch32x035_pwr.h>
-#include <ch32x035_rcc.h>
-#include <ch32x035_usart.h>
-#include <ch32x035_usbpd.h>
-
-// bug with an extra extern "C"...
-#ifndef __CH32X035_USB_H
-#include <ch32x035_usb.h>
-#ifdef __cplusplus
-}
-#endif
+#elif defined(CONFIG_SOC_CH32L103)
+#include <ch32l103.h>
+#elif defined(CONFIG_SOC_CH32V208)
+#include <ch32v20x.h>
 #endif
 
-#endif
+#endif /* _ASMLANGUAGE */
 
 #include <soc_common.h>
 
-#endif // SOC_H
+#endif /* ZEPHYR_SOC_WCH_CH32V_QINGKE_V4C_SOC_H_ */

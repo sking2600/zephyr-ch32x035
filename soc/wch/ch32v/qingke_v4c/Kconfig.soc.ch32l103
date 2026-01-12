@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+config SOC_CH32L103
+	bool "CH32L103"
+	select SOC_FAMILY_CH32V
+	select SOC_SERIES_QINGKE_V4C
+	select HAS_PM
+
+config SOC
+	default "ch32l103" if SOC_CH32L103

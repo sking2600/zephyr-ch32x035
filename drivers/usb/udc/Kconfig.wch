@@ -1,0 +1,9 @@
+# Copyright (c) 2025 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+config UDC_WCH_USBFS
+	bool "WCH USBFS Device Controller driver"
+	default y
+	depends on DT_HAS_WCH_USBFS_ENABLED
+	help
+	  WCH USB Full-Speed Device Controller driver.

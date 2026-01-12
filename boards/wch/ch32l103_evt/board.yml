@@ -1,0 +1,5 @@
+board:
+  name: ch32l103_evt
+  vendor: wch
+  socs:
+    - name: ch32l103

@@ -1,0 +1,10 @@
+# Copyright (c) 2025 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH USB Full-Speed Device Controller
+
+compatible: "wch,usbfs"
+
+include: [usb-ep.yaml, pinctrl-device.yaml]
+
+

@@ -10,27 +10,49 @@
 #include <zephyr/pm/pm.h>
 #include <zephyr/irq.h>
 
-/* CH32X035 runs at fixed 48MHz from internal oscillator */
-
+#if defined(CONFIG_SOC_CH32X035)
 static void clock_init(void)
 {
-    /* Configure flash wait states for 48MHz */
 #ifdef FLASH_ACTLR_LATENCY
-    FLASH->ACTLR = (FLASH->ACTLR & ~FLASH_ACTLR_LATENCY) | FLASH_ACTLR_LATENCY_2;
+	/* Configure flash wait states for 48MHz */
+	FLASH->ACTLR = (FLASH->ACTLR & ~FLASH_ACTLR_LATENCY) | FLASH_ACTLR_LATENCY_2;
 #endif
 
-    /* HCLK = SYSCLK / 1 */
-    RCC->CFGR0 = (RCC->CFGR0 & ~RCC_HPRE) | RCC_HPRE_DIV1;
+	/* HCLK = SYSCLK / 1 */
+	RCC->CFGR0 = (RCC->CFGR0 & ~RCC_HPRE) | RCC_HPRE_DIV1;
 
-    /* Enable DMA1 clock via direct register write (replaces RCC_AHBPeriphClockCmd) */
-    RCC->AHBPCENR |= RCC_AHBPeriph_DMA1;
-
-    /* Enable AFIO clock for pin remap and EXTI (replaces RCC_APB2PeriphClockCmd) */
-    RCC->APB2PCENR |= RCC_APB2Periph_AFIO;
-
-    /* Enable GPIO clocks - needed for any GPIO operation */
-    RCC->APB2PCENR |= RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB | RCC_APB2Periph_GPIOC;
+	/* Enable DMA1, AFIO, and GPIO clocks */
+	RCC->AHBPCENR |= BIT(0); /* DMA1EN */
+	RCC->APB2PCENR |= BIT(0); /* AFIOEN */
+	RCC->APB2PCENR |= BIT(2) | BIT(3) | BIT(4); /* IOPAEN, IOPBEN, IOPCEN */
 }
+
+static int wch_ch32x035_init(void)
+{
+	clock_init();
+	return 0;
+}
+
+SYS_INIT(wch_ch32x035_init, PRE_KERNEL_1, 0);
+#elif defined(CONFIG_SOC_CH32L103)
+static void clock_init(void)
+{
+	/* HCLK = SYSCLK / 1 */
+	RCC->CFGR0 = (RCC->CFGR0 & ~RCC_HPRE) | RCC_HPRE_DIV1;
+
+	/* Enable DMA, AFIO and GPIO clocks */
+	RCC->HBPCENR |= BIT(0); /* DMAEN */
+	RCC->PB2PCENR |= BIT(0) | BIT(2) | BIT(3) | BIT(4) | BIT(5); /* AFIO, GPIOA-D */
+}
+
+static int wch_ch32l103_init(void)
+{
+    clock_init();
+    return 0;
+}
+
+SYS_INIT(wch_ch32l103_init, PRE_KERNEL_1, 0);
+#endif
 
 /**
  * @brief SoC-level IRQ handler called from arch ISR
@@ -47,17 +69,6 @@ void __soc_handle_irq(unsigned long irq)
      */
     ARG_UNUSED(irq);
 }
-
-/**
- * @brief SoC early initialization
- */
-static int wch_ch32x035_init(void)
-{
-    clock_init();
-    return 0;
-}
-
-SYS_INIT(wch_ch32x035_init, PRE_KERNEL_1, 0);
 
 /* Power Management Hooks */
 

@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef __PINCTRL_SOC_H__
-#define __PINCTRL_SOC_H__
+#ifndef ZEPHYR_SOC_WCH_CH32V_QINGKE_V4C_PINCTRL_SOC_H_
+#define ZEPHYR_SOC_WCH_CH32V_QINGKE_V4C_PINCTRL_SOC_H_
 
 /**
  * @brief Type to hold a pin's pinctrl configuration.
  */
-struct ch32v208_pinctrl_soc_pin {
+struct qingke_v4c_pinctrl_soc_pin {
 	uint32_t config: 22;
 	bool bias_pull_up: 1;
 	bool bias_pull_down: 1;
@@ -21,7 +21,7 @@ struct ch32v208_pinctrl_soc_pin {
 	uint8_t slew_rate: 2;
 };
 
-typedef struct ch32v208_pinctrl_soc_pin pinctrl_soc_pin_t;
+typedef struct qingke_v4c_pinctrl_soc_pin pinctrl_soc_pin_t;
 
 #define Z_PINCTRL_STATE_PIN_INIT(node_id, prop, idx)                                               \
 	{                                                                                          \
@@ -39,4 +39,4 @@ typedef struct ch32v208_pinctrl_soc_pin pinctrl_soc_pin_t;
 	{DT_FOREACH_CHILD_VARGS(DT_PHANDLE(node_id, prop), DT_FOREACH_PROP_ELEM, pinmux,           \
 				Z_PINCTRL_STATE_PIN_INIT)}
 
-#endif
+#endif /* ZEPHYR_SOC_WCH_CH32V_QINGKE_V4C_PINCTRL_SOC_H_ */

@@ -1,0 +1,66 @@
+/*
+ * Copyright (c) 2026 Scott King
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <wch/ch32l103/ch32l103.dtsi>
+#include "ch32l103_evt-pinctrl.dtsi"
+
+/ {
+	model = "WCH CH32L103 Evaluation Board";
+	compatible = "wch,ch32l103-evt";
+
+	chosen {
+		zephyr,console = &usart1;
+		zephyr,shell-uart = &usart1;
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		blue_led: led_0 {
+			gpios = <&gpioa 0 GPIO_ACTIVE_LOW>;
+			label = "Blue LED";
+		};
+	};
+
+	aliases {
+		led0 = &blue_led;
+	};
+};
+
+&clk_hsi {
+	status = "okay";
+};
+
+&pll {
+	status = "okay";
+	clocks = <&clk_hsi>;
+	mul = <9>;
+};
+
+&usart1 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&usart1_default>;
+	pinctrl-names = "default";
+};
+
+&gpioa {
+	status = "okay";
+};
+
+&rcc {
+	status = "okay";
+	clocks = <&pll>;
+};
+
+zephyr_udc0: &usbfs {
+	status = "okay";
+	pinctrl-0 = <&usbfs_default>;
+	pinctrl-names = "default";
+};

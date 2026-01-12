@@ -1,0 +1,6 @@
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_CH32L103_EVT
+	bool "WCH CH32L103 Evaluation Board"
+	depends on SOC_CH32L103

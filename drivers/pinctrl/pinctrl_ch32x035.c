@@ -60,13 +60,13 @@ static void enable_gpio_clock(uint8_t port)
 {
 	switch (port) {
 	case 0:
-		RCC->APB2PCENR |= RCC_APB2Periph_GPIOA;
+		RCC->APB2PCENR |= RCC_IOPAEN;
 		break;
 	case 1:
-		RCC->APB2PCENR |= RCC_APB2Periph_GPIOB;
+		RCC->APB2PCENR |= RCC_IOPBEN;
 		break;
 	case 2:
-		RCC->APB2PCENR |= RCC_APB2Periph_GPIOC;
+		RCC->APB2PCENR |= RCC_IOPCEN;
 		break;
 	}
 }
@@ -149,7 +149,7 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintp
 static int pinctrl_ch32x035_init(void)
 {
 	/* Enable AFIO clock */
-	RCC->APB2PCENR |= RCC_APB2Periph_AFIO;
+	RCC->APB2PCENR |= RCC_AFIOEN;
 	return 0;
 }
 

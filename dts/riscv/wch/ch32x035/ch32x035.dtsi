@@ -177,7 +177,7 @@
         };
 
         usbfs: usbd@40023400 {
-            compatible = "wch,ch32-usbfs";
+            compatible = "wch,usbfs";
             reg = <0x40023400 0x400>;
             clocks = <&rcc RCC_AHB_USBFS>;
             interrupts = <45>; // USBFS_IRQn
