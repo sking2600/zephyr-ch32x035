@@ -11,7 +11,9 @@
 
 LOG_MODULE_REGISTER(udc_wch_usbfs, CONFIG_UDC_DRIVER_LOG_LEVEL);
 
+#ifndef DT_DRV_COMPAT
 #define DT_DRV_COMPAT wch_usbfs
+#endif
 
 
 

@@ -4,6 +4,8 @@
 config SOC_CH32V307
 	bool
 	select SOC_SERIES_QINGKE_V4F
+	select SOC_FAMILY_CH32V
+	select RISCV_ISA_RV32IMAFDC
 
 config SOC
 	default "ch32v307" if SOC_CH32V307

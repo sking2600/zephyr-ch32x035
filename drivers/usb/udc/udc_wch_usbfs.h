@@ -12,6 +12,8 @@
 #define CH32L103
 #elif defined(CONFIG_SOC_CH32X035)
 #define CH32X03x
+#elif defined(CONFIG_SOC_CH32V307)
+#define CH32V30x
 #endif
 
 #include <ch32fun.h>
@@ -20,6 +22,8 @@
 typedef USBFSD_TypeDef WCH_USBFS_RegDef;
 #elif defined(CONFIG_SOC_CH32X035)
 typedef USBFS_TypeDef WCH_USBFS_RegDef;
+#elif defined(CONFIG_SOC_CH32V307)
+typedef USBOTG_FS_TypeDef WCH_USBFS_RegDef;
 #endif
 
 /* USBFS Register Access Helpers */
@@ -84,6 +88,17 @@ static inline uint16_t wch_usbfs_get_ctrl(WCH_USBFS_RegDef *usb, uint8_t ep)
 	case 6: return usb->UEP6_CTRL_H;
 	case 7: return usb->UEP7_CTRL_H;
 	}
+#elif defined(CONFIG_SOC_CH32V307)
+	switch (ep) {
+	case 0: return (usb->UEP0_RX_CTRL << 8) | usb->UEP0_TX_CTRL;
+	case 1: return (usb->UEP1_RX_CTRL << 8) | usb->UEP1_TX_CTRL;
+	case 2: return (usb->UEP2_RX_CTRL << 8) | usb->UEP2_TX_CTRL;
+	case 3: return (usb->UEP3_RX_CTRL << 8) | usb->UEP3_TX_CTRL;
+	case 4: return (usb->UEP4_RX_CTRL << 8) | usb->UEP4_TX_CTRL;
+	case 5: return (usb->UEP5_RX_CTRL << 8) | usb->UEP5_TX_CTRL;
+	case 6: return (usb->UEP6_RX_CTRL << 8) | usb->UEP6_TX_CTRL;
+	case 7: return (usb->UEP7_RX_CTRL << 8) | usb->UEP7_TX_CTRL;
+	}
 #else
 	switch (ep) {
 	case 0: return usb->UEP0_CTRL;
@@ -111,6 +126,17 @@ static inline void wch_usbfs_set_ctrl(WCH_USBFS_RegDef *usb, uint8_t ep, uint16_
 	case 5: usb->UEP5_CTRL_H = val; break;
 	case 6: usb->UEP6_CTRL_H = val; break;
 	case 7: usb->UEP7_CTRL_H = val; break;
+	}
+#elif defined(CONFIG_SOC_CH32V307)
+	switch (ep) {
+	case 0: usb->UEP0_TX_CTRL = val & 0xFF; usb->UEP0_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 1: usb->UEP1_TX_CTRL = val & 0xFF; usb->UEP1_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 2: usb->UEP2_TX_CTRL = val & 0xFF; usb->UEP2_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 3: usb->UEP3_TX_CTRL = val & 0xFF; usb->UEP3_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 4: usb->UEP4_TX_CTRL = val & 0xFF; usb->UEP4_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 5: usb->UEP5_TX_CTRL = val & 0xFF; usb->UEP5_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 6: usb->UEP6_TX_CTRL = val & 0xFF; usb->UEP6_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 7: usb->UEP7_TX_CTRL = val & 0xFF; usb->UEP7_RX_CTRL = (val >> 8) & 0xFF; break;
 	}
 #else
 	switch (ep) {

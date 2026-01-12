@@ -208,6 +208,17 @@
 			dma-channels = <7>;
 		};
 
+		usbfs: usbfs@50000000 {
+			compatible = "wch,ch32v307-usbfs", "wch,usbfs";
+			reg = <0x50000000 0x1000>;
+			interrupt-parent = <&pfic>;
+			interrupts = <83>;
+			interrupt-names = "usbfs";
+			num-bidir-endpoints = <8>;
+			clocks = <&rcc CH32V20X_V30X_CLOCK_OTG_FS>;
+			status = "disabled";
+		};
+
 		dma2: dma@40020400 {
 			compatible = "wch,wch-dma";
 			reg = <0x40020400 0x90>;
