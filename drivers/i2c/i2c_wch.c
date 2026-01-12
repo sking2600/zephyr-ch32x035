@@ -21,6 +21,8 @@ LOG_MODULE_REGISTER(i2c_wch);
 
 #include <hal_ch32fun.h>
 
+#include <zephyr/drivers/dma.h>
+
 typedef void (*irq_config_func_t)(const struct device *port);
 
 struct i2c_wch_config {
@@ -30,10 +32,19 @@ struct i2c_wch_config {
 	I2C_TypeDef *regs;
 	uint32_t bitrate;
 	uint8_t clk_id;
+#ifdef CONFIG_I2C_WCH_DMA
+	const struct device *dma_dev;
+	uint8_t dma_tx_chan;
+	uint8_t dma_rx_chan;
+#endif
 };
 
 struct i2c_wch_data {
 	struct k_sem xfer_done;
+#ifdef CONFIG_I2C_WCH_DMA
+	struct k_sem dma_sem;
+	int dma_status;
+#endif
 	struct {
 		struct i2c_msg *msg;
 		uint32_t idx;
@@ -46,6 +57,56 @@ struct i2c_wch_data {
 		};
 	} current;
 };
+
+#ifdef CONFIG_I2C_WCH_DMA
+static void i2c_wch_dma_callback(const struct device *dev, void *user_data,
+				 uint32_t channel, int status)
+{
+	const struct device *i2c_dev = user_data;
+	struct i2c_wch_data *data = i2c_dev->data;
+
+	if (status < 0) {
+		data->dma_status = status;
+	}
+	k_sem_give(&data->dma_sem);
+}
+
+static int i2c_wch_dma_setup(const struct device *dev, uint8_t *buf, size_t len, bool write)
+{
+	const struct i2c_wch_config *config = dev->config;
+	struct dma_config dma_cfg = {0};
+	struct dma_block_config dma_blk = {0};
+	uint8_t chan;
+
+	if (write) {
+		dma_cfg.channel_direction = MEMORY_TO_PERIPHERAL;
+		chan = config->dma_tx_chan;
+	} else {
+		dma_cfg.channel_direction = PERIPHERAL_TO_MEMORY;
+		chan = config->dma_rx_chan;
+	}
+
+	dma_cfg.source_data_size = 1;
+	dma_cfg.dest_data_size = 1;
+	dma_cfg.block_count = 1;
+	dma_cfg.head_block = &dma_blk;
+	dma_cfg.dma_callback = i2c_wch_dma_callback;
+	dma_cfg.user_data = (void *)dev;
+
+	dma_blk.block_size = len;
+	if (write) {
+		dma_blk.source_address = (uint32_t)buf;
+		dma_blk.dest_address = (uint32_t)&config->regs->DATAR;
+		dma_blk.source_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+	} else {
+		dma_blk.source_address = (uint32_t)&config->regs->DATAR;
+		dma_blk.dest_address = (uint32_t)buf;
+		dma_blk.dest_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+	}
+
+	return dma_config(config->dma_dev, chan, &dma_cfg);
+}
+#endif
 
 static void wch_i2c_handle_start_bit(const struct device *dev)
 {
@@ -80,6 +141,23 @@ static void wch_i2c_handle_addr(const struct device *dev)
 
 	regs->STAR1;
 	regs->STAR2;
+
+#ifdef CONFIG_I2C_WCH_DMA
+	if (config->dma_dev != NULL && data->current.msg->len > 1) {
+		bool write = (data->current.msg->flags & I2C_MSG_RW_MASK) == I2C_MSG_WRITE;
+		uint8_t chan = write ? config->dma_tx_chan : config->dma_rx_chan;
+
+		/* Disable buf matching interrupts, we use DMA */
+		regs->CTLR2 &= ~I2C_CTLR2_ITBUFEN;
+		regs->CTLR2 |= I2C_CTLR2_DMAEN;
+
+		data->dma_status = 0;
+		k_sem_reset(&data->dma_sem);
+
+		i2c_wch_dma_setup(dev, data->current.msg->buf, data->current.msg->len, write);
+		dma_start(config->dma_dev, chan);
+	}
+#endif
 }
 
 static void wch_i2c_handle_txe(const struct device *dev)
@@ -87,6 +165,19 @@ static void wch_i2c_handle_txe(const struct device *dev)
 	const struct i2c_wch_config *config = dev->config;
 	struct i2c_wch_data *data = dev->data;
 	I2C_TypeDef *regs = config->regs;
+
+#ifdef CONFIG_I2C_WCH_DMA
+	if (regs->CTLR2 & I2C_CTLR2_DMAEN) {
+		/* Wait for DMA to complete */
+		if (k_sem_take(&data->dma_sem, K_NO_WAIT) == 0) {
+			regs->CTLR2 &= ~I2C_CTLR2_DMAEN;
+			data->current.idx = data->current.msg->len;
+			/* Proceed to stop or next message */
+		} else {
+			return;
+		}
+	}
+#endif
 
 	if (data->current.idx < data->current.msg->len) {
 		regs->DATAR = data->current.msg->buf[data->current.idx++];
@@ -111,6 +202,17 @@ static void wch_i2c_handle_rxne(const struct device *dev)
 	const struct i2c_wch_config *config = dev->config;
 	struct i2c_wch_data *data = dev->data;
 	I2C_TypeDef *regs = config->regs;
+
+#ifdef CONFIG_I2C_WCH_DMA
+	if (regs->CTLR2 & I2C_CTLR2_DMAEN) {
+		if (k_sem_take(&data->dma_sem, K_NO_WAIT) == 0) {
+			regs->CTLR2 &= ~I2C_CTLR2_DMAEN;
+			data->current.idx = data->current.msg->len;
+		} else {
+			return;
+		}
+	}
+#endif
 
 	if (data->current.idx < data->current.msg->len) {
 		switch (data->current.msg->len - data->current.idx) {
@@ -375,6 +477,9 @@ static int i2c_wch_init(const struct device *dev)
 	int err;
 
 	k_sem_init(&data->xfer_done, 0, 1);
+#ifdef CONFIG_I2C_WCH_DMA
+	k_sem_init(&data->dma_sem, 0, 1);
+#endif
 
 	clk_sys = (clock_control_subsys_t)(uintptr_t)config->clk_id;
 
@@ -406,6 +511,13 @@ static DEVICE_API(i2c, i2c_wch_api) = {
 #endif
 };
 
+#define I2C_WCH_DMA_CHAN_INIT(inst)							\
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, dmas),					\
+		(.dma_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(inst, tx)),		\
+		 .dma_tx_chan = DT_INST_DMAS_CELL_BY_NAME(inst, tx, channel),		\
+		 .dma_rx_chan = DT_INST_DMAS_CELL_BY_NAME(inst, rx, channel),),		\
+		())
+
 #define I2C_WCH_INIT(inst)								\
 	PINCTRL_DT_INST_DEFINE(inst);							\
 											\
@@ -417,7 +529,8 @@ static DEVICE_API(i2c, i2c_wch_api) = {
 		.clk_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(inst)),			\
 		.regs = (I2C_TypeDef *)DT_INST_REG_ADDR(inst),				\
 		.bitrate = DT_INST_PROP(inst, clock_frequency),				\
-		.clk_id = DT_INST_CLOCKS_CELL(inst, id)					\
+		.clk_id = DT_INST_CLOCKS_CELL(inst, id),				\
+		I2C_WCH_DMA_CHAN_INIT(inst)						\
 	};										\
 											\
 	static struct i2c_wch_data i2c_wch_data_##inst;					\

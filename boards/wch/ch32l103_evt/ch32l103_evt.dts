@@ -81,6 +81,8 @@ zephyr_udc0: &usbfs {
     status = "okay";
     pinctrl-0 = <&spi1_default>;
     pinctrl-names = "default";
+    dmas = <&dma1 2>, <&dma1 1>;
+    dma-names = "tx", "rx";
 };
 
 &i2c1 {
@@ -88,6 +90,8 @@ zephyr_udc0: &usbfs {
     pinctrl-0 = <&i2c1_default>;
     pinctrl-names = "default";
     clock-frequency = <I2C_BITRATE_STANDARD>;
+    dmas = <&dma1 5>, <&dma1 6>;
+    dma-names = "tx", "rx";
 };
 
 &opacmp {

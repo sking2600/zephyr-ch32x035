@@ -13,3 +13,10 @@ config I2C_WCH_XFER_TIMEOUT_MS
 	int "Set the transfer timeout in milliseconds"
 	depends on I2C_WCH
 	default 500
+
+config I2C_WCH_DMA
+	bool "WCH I2C DMA support"
+	depends on I2C_WCH
+	select DMA
+	help
+	  Enable DMA support for the WCH I2C driver.

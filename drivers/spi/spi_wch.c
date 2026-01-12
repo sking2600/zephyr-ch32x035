@@ -19,6 +19,8 @@ LOG_MODULE_REGISTER(spi_wch);
 
 #include <hal_ch32fun.h>
 
+#include <zephyr/drivers/dma.h>
+
 #define SPI_CTLR1_LSBFIRST BIT(7)
 #define SPI_CTLR1_BR_POS   3
 
@@ -27,11 +29,93 @@ struct spi_wch_config {
 	const struct pinctrl_dev_config *pin_cfg;
 	const struct device *clk_dev;
 	uint8_t clock_id;
+#ifdef CONFIG_SPI_WCH_DMA
+	const struct device *dma_dev;
+	uint8_t dma_tx_chan;
+	uint8_t dma_rx_chan;
+#endif
 };
 
 struct spi_wch_data {
 	struct spi_context ctx;
+#ifdef CONFIG_SPI_WCH_DMA
+	struct k_sem dma_sem;
+	int dma_status;
+	uint8_t dummy_tx;
+	uint8_t dummy_rx;
+#endif
 };
+
+#ifdef CONFIG_SPI_WCH_DMA
+static void spi_wch_dma_callback(const struct device *dev, void *user_data,
+				 uint32_t channel, int status)
+{
+	const struct device *spi_dev = user_data;
+	struct spi_wch_data *data = spi_dev->data;
+
+	if (status < 0) {
+		data->dma_status = status;
+	}
+	k_sem_give(&data->dma_sem);
+}
+
+static int spi_wch_dma_tx(const struct device *dev, const uint8_t *buf, size_t len)
+{
+	const struct spi_wch_config *cfg = dev->config;
+	struct dma_config dma_cfg = {0};
+	struct dma_block_config dma_blk = {0};
+
+	dma_cfg.channel_direction = MEMORY_TO_PERIPHERAL;
+	dma_cfg.source_data_size = 1;
+	dma_cfg.dest_data_size = 1;
+	dma_cfg.block_count = 1;
+	dma_cfg.head_block = &dma_blk;
+	dma_cfg.dma_callback = spi_wch_dma_callback;
+	dma_cfg.user_data = (void *)dev;
+
+	dma_blk.block_size = len;
+	dma_blk.dest_address = (uint32_t)&cfg->regs->DATAR;
+	if (buf != NULL) {
+		dma_blk.source_address = (uint32_t)buf;
+		dma_blk.source_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+	} else {
+		struct spi_wch_data *data = dev->data;
+		data->dummy_tx = 0;
+		dma_blk.source_address = (uint32_t)&data->dummy_tx;
+		dma_blk.source_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+	}
+
+	return dma_config(cfg->dma_dev, cfg->dma_tx_chan, &dma_cfg);
+}
+
+static int spi_wch_dma_rx(const struct device *dev, uint8_t *buf, size_t len)
+{
+	const struct spi_wch_config *cfg = dev->config;
+	struct dma_config dma_cfg = {0};
+	struct dma_block_config dma_blk = {0};
+
+	dma_cfg.channel_direction = PERIPHERAL_TO_MEMORY;
+	dma_cfg.source_data_size = 1;
+	dma_cfg.dest_data_size = 1;
+	dma_cfg.block_count = 1;
+	dma_cfg.head_block = &dma_blk;
+	dma_cfg.dma_callback = spi_wch_dma_callback;
+	dma_cfg.user_data = (void *)dev;
+
+	dma_blk.block_size = len;
+	dma_blk.source_address = (uint32_t)&cfg->regs->DATAR;
+	if (buf != NULL) {
+		dma_blk.dest_address = (uint32_t)buf;
+		dma_blk.dest_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+	} else {
+		struct spi_wch_data *data = dev->data;
+		dma_blk.dest_address = (uint32_t)&data->dummy_rx;
+		dma_blk.dest_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+	}
+
+	return dma_config(cfg->dma_dev, cfg->dma_rx_chan, &dma_cfg);
+}
+#endif
 
 static uint8_t spi_wch_get_br(uint32_t target_clock_ratio)
 {
@@ -154,6 +238,58 @@ static int spi_wch_transceive(const struct device *dev, const struct spi_config 
 	/* Start SPI *AFTER* setting CS */
 	regs->CTLR1 |= SPI_CTLR1_SPE;
 
+#ifdef CONFIG_SPI_WCH_DMA
+	if (cfg->dma_dev != NULL) {
+		while (spi_context_total_tx_len(&data->ctx) > 0 ||
+		       spi_context_total_rx_len(&data->ctx) > 0) {
+			size_t len = spi_context_max_continuous_chunk(&data->ctx);
+
+			data->dma_status = 0;
+			k_sem_reset(&data->dma_sem);
+
+			err = spi_wch_dma_tx(dev, data->ctx.tx_buf, len);
+			if (err != 0) {
+				goto done_dma;
+			}
+			err = spi_wch_dma_rx(dev, data->ctx.rx_buf, len);
+			if (err != 0) {
+				goto done_dma;
+			}
+
+			err = dma_start(cfg->dma_dev, cfg->dma_tx_chan);
+			if (err != 0) {
+				goto done_dma;
+			}
+			err = dma_start(cfg->dma_dev, cfg->dma_rx_chan);
+			if (err != 0) {
+				dma_stop(cfg->dma_dev, cfg->dma_tx_chan);
+				goto done_dma;
+			}
+
+			regs->CTLR2 |= SPI_I2S_DMAReq_Tx | SPI_I2S_DMAReq_Rx;
+
+			/* Wait for both TX and RX to complete */
+			k_sem_take(&data->dma_sem, K_FOREVER);
+			k_sem_take(&data->dma_sem, K_FOREVER);
+
+			regs->CTLR2 &= ~(SPI_I2S_DMAReq_Tx | SPI_I2S_DMAReq_Rx);
+
+			if (data->dma_status < 0) {
+				err = data->dma_status;
+				goto done_dma;
+			}
+
+			spi_context_update_tx(&data->ctx, 1, len);
+			spi_context_update_rx(&data->ctx, 1, len);
+		}
+		goto done;
+
+done_dma:
+		regs->CTLR2 &= ~(SPI_I2S_DMAReq_Tx | SPI_I2S_DMAReq_Rx);
+		goto done;
+	}
+#endif
+
 	while (spi_context_tx_on(&data->ctx) || spi_context_rx_on(&data->ctx)) {
 		if (spi_context_tx_buf_on(&data->ctx)) {
 			while ((regs->STATR & SPI_STATR_TXE) == 0U) {
@@ -221,6 +357,10 @@ static int spi_wch_init(const struct device *dev)
 		return err;
 	}
 
+#ifdef CONFIG_SPI_WCH_DMA
+	k_sem_init(&data->dma_sem, 0, 2);
+#endif
+
 	spi_context_unlock_unconditionally(&data->ctx);
 
 	return 0;
@@ -234,13 +374,21 @@ static DEVICE_API(spi, spi_wch_driver_api) = {
 	.release = spi_wch_release,
 };
 
+#define SPI_WCH_DMA_CHAN_INIT(inst)                                                                \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, dmas),                                             \
+		(.dma_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(inst, tx)),                    \
+		 .dma_tx_chan = DT_INST_DMAS_CELL_BY_NAME(inst, tx, channel),                      \
+		 .dma_rx_chan = DT_INST_DMAS_CELL_BY_NAME(inst, rx, channel),),                    \
+		())
+
 #define SPI_WCH_DEVICE_INIT(n)                                                                     \
 	PINCTRL_DT_INST_DEFINE(n);                                                                 \
 	static const struct spi_wch_config spi_wch_config_##n = {                                  \
 		.regs = (SPI_TypeDef *)DT_INST_REG_ADDR(n),                                        \
 		.clk_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                                  \
 		.pin_cfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),                                      \
-		.clock_id = DT_INST_CLOCKS_CELL(n, id)};                                           \
+		.clock_id = DT_INST_CLOCKS_CELL(n, id),                                            \
+		SPI_WCH_DMA_CHAN_INIT(n)};                                                         \
 	static struct spi_wch_data spi_wch_dev_data_##n = {                                        \
 		SPI_CONTEXT_INIT_LOCK(spi_wch_dev_data_##n, ctx),                                  \
 		SPI_CONTEXT_INIT_SYNC(spi_wch_dev_data_##n, ctx),                                  \
