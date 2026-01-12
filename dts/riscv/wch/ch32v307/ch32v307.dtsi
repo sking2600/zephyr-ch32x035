@@ -219,6 +219,17 @@
 			status = "disabled";
 		};
 
+		usbhs: usbhs@40023400 {
+			compatible = "wch,ch32v307-usbhs", "wch,usbhs";
+			reg = <0x40023400 0x400>;
+			interrupt-parent = <&pfic>;
+			interrupts = <85>;
+			interrupt-names = "usbhs";
+			num-bidir-endpoints = <16>;
+			clocks = <&rcc CH32V20X_V30X_CLOCK_USBHS>;
+			status = "disabled";
+		};
+
 		dma2: dma@40020400 {
 			compatible = "wch,wch-dma";
 			reg = <0x40020400 0x90>;

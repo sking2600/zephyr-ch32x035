@@ -59,8 +59,12 @@
 	clocks = <&pll>;
 };
 
-zephyr_udc0: &usbfs {
-	status = "okay";
+&usbfs {
+	status = "disabled";
 	pinctrl-0 = <&usbfs_default>;
 	pinctrl-names = "default";
+};
+
+zephyr_udc0: &usbhs {
+	status = "okay";
 };

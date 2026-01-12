@@ -7,3 +7,11 @@ config UDC_WCH_USBFS
 	depends on DT_HAS_WCH_USBFS_ENABLED
 	help
 	  WCH USB Full-Speed Device Controller driver.
+
+config UDC_WCH_USBHS
+	bool "WCH USBHS Device Controller driver"
+	default y
+	depends on DT_HAS_WCH_USBHS_ENABLED
+	select UDC_DRIVER_HAS_HIGH_SPEED_SUPPORT
+	help
+	  WCH USB High-Speed Device Controller driver.

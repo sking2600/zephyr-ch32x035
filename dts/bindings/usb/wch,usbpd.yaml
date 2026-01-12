@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH USB Power Delivery Controller
+
+compatible: "wch,ch32-usbpd"
+
+include: [base.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clocks:
+    required: true
+
+  "#address-cells":
+    const: 1
+
+  "#size-cells":
+    const: 0
+

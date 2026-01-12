@@ -3,7 +3,7 @@
 zephyr_library()
 
 # zephyr-keep-sorted-start
-zephyr_library_sources_ifdef(CONFIG_USBC_TCPC_CH32X035 tcpc_ch32x035.c)
+zephyr_library_sources_ifdef(CONFIG_USBC_TCPC_WCH tcpc_wch_usbpd.c)
 zephyr_library_sources_ifdef(CONFIG_USBC_TCPC_FUSB307 fusb307.c)
 zephyr_library_sources_ifdef(CONFIG_USBC_TCPC_NUMAKER ucpd_numaker.c)
 zephyr_library_sources_ifdef(CONFIG_USBC_TCPC_PS8XXX ps8xxx.c)

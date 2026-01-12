@@ -24,4 +24,13 @@
 			pinmux = <USB_DM_PA11>, <USB_DP_PA12>;
 		};
 	};
+
+    usbpd_default: usbpd_default {
+        group1 {
+            /* PB6 and PB7 are CC1 and CC2 */
+            pinmux = <CH32V20X_V30X_PINMUX_DEFINE(PB, 6, SPI1, 0)>,
+                     <CH32V20X_V30X_PINMUX_DEFINE(PB, 7, SPI1, 0)>;
+            drive-open-drain; 
+        };
+    };
 };

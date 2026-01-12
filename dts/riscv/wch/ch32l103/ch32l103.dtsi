@@ -320,6 +320,15 @@
 			num-bidir-endpoints = <8>;
 			status = "disabled";
 		};
+
+		usbpd: usbpd@40027000 {
+			compatible = "wch,ch32-usbpd";
+			reg = <0x40027000 0x400>;
+			interrupt-parent = <&pfic>;
+			interrupts = <65>;
+			clocks = <&rcc RCC_AHB_USBPD>;
+			status = "disabled";
+		};
 	};
 };
 
