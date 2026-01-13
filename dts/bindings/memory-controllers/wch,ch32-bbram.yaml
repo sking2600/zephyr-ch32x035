@@ -1,0 +1,14 @@
+# Copyright (c) 2024 WCH
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH Battery Backed RAM (BKP)
+
+compatible: "wch,ch32-bbram"
+
+include: base.yaml
+
+properties:
+  size:
+    type: int
+    required: true
+    description: Size of BBRAM in bytes.

@@ -20,6 +20,7 @@ LOG_MODULE_REGISTER(spi_wch);
 #include <hal_ch32fun.h>
 
 #include <zephyr/drivers/dma.h>
+#include <zephyr/pm/device.h>
 
 #define SPI_CTLR1_LSBFIRST BIT(7)
 #define SPI_CTLR1_BR_POS   3
@@ -41,8 +42,8 @@ struct spi_wch_data {
 #ifdef CONFIG_SPI_WCH_DMA
 	struct k_sem dma_sem;
 	int dma_status;
-	uint8_t dummy_tx;
-	uint8_t dummy_rx;
+	uint16_t dummy_tx;
+	uint16_t dummy_rx;
 #endif
 };
 
@@ -85,6 +86,14 @@ static int spi_wch_dma_tx(const struct device *dev, const uint8_t *buf, size_t l
 		dma_blk.source_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
 	}
 
+	if (SPI_WORD_SIZE_GET(data->ctx.config->operation) == 16) {
+		dma_cfg.source_data_size = 2;
+		dma_cfg.dest_data_size = 2;
+	} else {
+		dma_cfg.source_data_size = 1;
+		dma_cfg.dest_data_size = 1;
+	}
+
 	return dma_config(cfg->dma_dev, cfg->dma_tx_chan, &dma_cfg);
 }
 
@@ -111,6 +120,14 @@ static int spi_wch_dma_rx(const struct device *dev, uint8_t *buf, size_t len)
 		struct spi_wch_data *data = dev->data;
 		dma_blk.dest_address = (uint32_t)&data->dummy_rx;
 		dma_blk.dest_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+	}
+
+	if (SPI_WORD_SIZE_GET(data->ctx.config->operation) == 16) {
+		dma_cfg.source_data_size = 2;
+		dma_cfg.dest_data_size = 2;
+	} else {
+		dma_cfg.source_data_size = 1;
+		dma_cfg.dest_data_size = 1;
 	}
 
 	return dma_config(cfg->dma_dev, cfg->dma_rx_chan, &dma_cfg);
@@ -161,8 +178,9 @@ static int spi_wch_configure(const struct device *dev, const struct spi_config *
 		return -ENOTSUP;
 	}
 
-	if (SPI_WORD_SIZE_GET(config->operation) != 8) {
-		LOG_ERR("Frame size != 8 bits not supported");
+	uint32_t word_size = SPI_WORD_SIZE_GET(config->operation);
+	if (word_size != 8 && word_size != 16) {
+		LOG_ERR("Frame size %d bits not supported", word_size);
 		return -ENOTSUP;
 	}
 
@@ -189,6 +207,10 @@ static int spi_wch_configure(const struct device *dev, const struct spi_config *
 
 	if ((config->operation & SPI_MODE_CPHA) != 0U) {
 		regs->CTLR1 |= SPI_CTLR1_CPHA;
+	}
+
+	if (word_size == 16) {
+		regs->CTLR1 |= SPI_CTLR1_DFF;
 	}
 
 	clk_sys = (clock_control_subsys_t)(uintptr_t)cfg->clock_id;
@@ -290,24 +312,55 @@ done_dma:
 	}
 #endif
 
+	uint32_t word_size = SPI_WORD_SIZE_GET(config->operation);
+	uint32_t dsize = (word_size == 16) ? 2 : 1;
+
 	while (spi_context_tx_on(&data->ctx) || spi_context_rx_on(&data->ctx)) {
-		if (spi_context_tx_buf_on(&data->ctx)) {
-			while ((regs->STATR & SPI_STATR_TXE) == 0U) {
+			uint32_t timeout = 100000;
+			while ((regs->STATR & SPI_STATR_TXE) == 0U && timeout-- > 0) {
 			}
-			regs->DATAR = *(uint8_t *)(data->ctx.tx_buf);
+			if (timeout == 0) {
+				LOG_ERR("TXE timeout");
+				err = -ETIMEDOUT;
+				goto done;
+			}
+			if (word_size == 16) {
+				regs->DATAR = *(uint16_t *)(data->ctx.tx_buf);
+			} else {
+				regs->DATAR = *(uint8_t *)(data->ctx.tx_buf);
+			}
 		} else {
-			while ((regs->STATR & SPI_STATR_TXE) == 0U) {
+			uint32_t timeout = 100000;
+			while ((regs->STATR & SPI_STATR_TXE) == 0U && timeout-- > 0) {
+			}
+			if (timeout == 0) {
+				LOG_ERR("TXE timeout");
+				err = -ETIMEDOUT;
+				goto done;
 			}
 			regs->DATAR = 0;
 		}
-		spi_context_update_tx(&data->ctx, 1, 1);
-		while ((regs->STATR & SPI_STATR_RXNE) == 0U) {
+		spi_context_update_tx(&data->ctx, dsize, dsize);
+		uint32_t timeout = 100000;
+		while ((regs->STATR & SPI_STATR_RXNE) == 0U && timeout-- > 0) {
 		}
-		rx = regs->DATAR;
-		if (spi_context_rx_buf_on(&data->ctx)) {
-			*data->ctx.rx_buf = rx;
+		if (timeout == 0) {
+			LOG_ERR("RXNE timeout");
+			err = -ETIMEDOUT;
+			goto done;
 		}
-		spi_context_update_rx(&data->ctx, 1, 1);
+		if (word_size == 16) {
+			uint16_t rx16 = regs->DATAR;
+			if (spi_context_rx_buf_on(&data->ctx)) {
+				*(uint16_t *)data->ctx.rx_buf = rx16;
+			}
+		} else {
+			uint8_t rx8 = regs->DATAR;
+			if (spi_context_rx_buf_on(&data->ctx)) {
+				*data->ctx.rx_buf = rx8;
+			}
+		}
+		spi_context_update_rx(&data->ctx, dsize, dsize);
 	}
 
 done:
@@ -366,6 +419,35 @@ static int spi_wch_init(const struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM_DEVICE
+static int spi_wch_pm_action(const struct device *dev, enum pm_device_action action)
+{
+	const struct spi_wch_config *config = dev->config;
+	int err;
+
+	switch (action) {
+	case PM_DEVICE_ACTION_SUSPEND:
+		config->regs->CTLR1 &= ~SPI_CTLR1_SPE;
+		err = clock_control_off(config->clk_dev, (clock_control_subsys_t)(uintptr_t)config->clk_id);
+		if (err < 0) {
+			return err;
+		}
+		break;
+	case PM_DEVICE_ACTION_RESUME:
+		err = clock_control_on(config->clk_dev, (clock_control_subsys_t)(uintptr_t)config->clk_id);
+		if (err < 0) {
+			return err;
+		}
+		config->regs->CTLR1 |= SPI_CTLR1_SPE;
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+#endif
+
 static DEVICE_API(spi, spi_wch_driver_api) = {
 	.transceive = spi_wch_transceive_sync,
 #ifdef CONFIG_SPI_RTIO
@@ -393,7 +475,8 @@ static DEVICE_API(spi, spi_wch_driver_api) = {
 		SPI_CONTEXT_INIT_LOCK(spi_wch_dev_data_##n, ctx),                                  \
 		SPI_CONTEXT_INIT_SYNC(spi_wch_dev_data_##n, ctx),                                  \
 		SPI_CONTEXT_CS_GPIOS_INITIALIZE(DT_DRV_INST(n), ctx)};                             \
-	SPI_DEVICE_DT_INST_DEFINE(n, spi_wch_init, NULL, &spi_wch_dev_data_##n,                    \
+	PM_DEVICE_DT_INST_DEFINE(n, spi_wch_pm_action);                                            \
+	SPI_DEVICE_DT_INST_DEFINE(n, spi_wch_init, PM_DEVICE_DT_INST_GET(n), &spi_wch_dev_data_##n, \
 				  &spi_wch_config_##n, POST_KERNEL, CONFIG_SPI_INIT_PRIORITY,      \
 				  &spi_wch_driver_api);
 

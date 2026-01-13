@@ -1,0 +1,19 @@
+# Copyright (c) 2024 WCH
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH PWR (Power Control)
+
+compatible: "wch,pwr"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clocks:
+    required: true

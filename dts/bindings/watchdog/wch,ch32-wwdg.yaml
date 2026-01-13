@@ -1,0 +1,9 @@
+description: WCH Window Watchdog
+
+compatible: "wch,ch32-wwdg"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true

@@ -1,0 +1,20 @@
+/ {
+	chosen {
+		zephyr,canbus = &can1;
+	};
+};
+
+&can1 {
+	status = "okay";
+	bitrate = <125000>;
+	bitrate-data = <1000000>;
+	sample-point = <875>;
+	sample-point-data = <875>;
+};
+
+/* Disable peripherals to save ROM */
+&usbfs { status = "disabled"; };
+&usbpd { status = "disabled"; };
+&adc1 { status = "disabled"; };
+&spi1 { status = "disabled"; };
+&i2c1 { status = "disabled"; };

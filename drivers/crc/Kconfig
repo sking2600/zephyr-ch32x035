@@ -69,6 +69,13 @@ config CRC_DRIVER_HAS_CRC16_ITU_T
 	help
 	  CRC driver has CRC16 ITU-T computation
 
+config CRC_WCH
+	bool "WCH CH32 CRC driver"
+	default y
+	depends on DT_HAS_WCH_CH32_CRC_ENABLED
+	help
+	  Enable CRC driver for WCH CH32 series.
+
 config CRC_DRIVER_HAS_CRC16_ANSI
 	bool
 	depends on CRC_DRIVER_HAS_CRC16_REFLECT

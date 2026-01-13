@@ -23,6 +23,7 @@ LOG_MODULE_REGISTER(tcpc_wch_usbpd, CONFIG_USBC_LOG_LEVEL);
 #endif
 
 #define PD_HEADER_CNT(header)  (((header) >> 12) & 0x7)
+#define PD_HEADER_TYPE(header) ((header) & 0x1F)
 
 struct tcpc_wch_config {
     uint32_t base;
@@ -30,7 +31,6 @@ struct tcpc_wch_config {
     const struct device *clock_dev;
     uint32_t pclk_id; 
 };
-
 
 struct tcpc_wch_data {
     /* Callback for alerts */
@@ -88,17 +88,13 @@ static int tcpc_wch_init(const struct device *dev)
     return 0;
 }
 
-
-
 static enum tc_cc_voltage_state tcpc_wch_measure_cc(USBPD_TypeDef *pd, int cc_idx, uint16_t port_val)
 {
     volatile uint16_t *port_reg = (cc_idx == 1) ? (uint16_t *)&pd->PORT_CC1 : (uint16_t *)&pd->PORT_CC2;
     uint16_t base = port_val & ~(CC_CE);
     bool is_rd = (base & CC_PD); /* We are Sink */
-    // bool is_rp = (base & CC_PU_Mask); /* We are Source */
-
+    
     /* If disconnected (OPEN), returns OPEN */
-    /* Implementation based on CMP thresholds */
     
     if (is_rd) {
         /* WE ARE SINK (Rd asserted) */
@@ -127,26 +123,54 @@ static enum tc_cc_voltage_state tcpc_wch_measure_cc(USBPD_TypeDef *pd, int cc_id
 
     } else {
         /* WE ARE SOURCE (Rp asserted) or Open */
+        /* To distinguish Open vs Rd vs Ra reliably, we force Rp to Default (80uA) momentarily */
+        uint16_t original_p = base;
+        
+        /* Force Rp to Default (CC_PU_80 = 0x0C approx? No, need checks) 
+           CC_PU_Mask = 0x0C (CC_PU_80 | CC_PU_180 | CC_PU_330)
+           CC_PU_80 = 0x04 or similar. Use constants.
+        */
+        #define WCH_CC_PU_80 CC_PU_80
+        
+        uint16_t test_cfg = (base & ~CC_PU_Mask) | WCH_CC_PU_80;
+        
+        /* Apply test config */
+        *port_reg = test_cfg;
+        k_busy_wait(10); /* settling time */
+        
+        /* Now with Default Rp:
+            Open (> 2.4V) -> > 1.23V
+            Rd (0.4V - 0.8V) -> 0.22V - 1.23V? 
+                Rd=5.1k, Rp=36k (Def). V = 3.3 * 5.1/41.1 = 0.41V.
+            Ra (0.0 - 0.2V) -> < 0.22V
+                Ra=1k, Rp=36k. V = 3.3 * 1/37 = 0.089V.
+        */
+
+        enum tc_cc_voltage_state res = TC_CC_VOLT_OPEN;
+
         /* Check < 0.22V (Ra) */
-        *port_reg = base | CC_CMP_22;
+        *port_reg = test_cfg | CC_CMP_22;
         k_busy_wait(5);
         if (!(*port_reg & PA_CC_AI)) {
-            return TC_CC_VOLT_RA;
+            res = TC_CC_VOLT_RA;
+            goto done;
         }
 
-        /* Check Open vs Rd */
-        /* Ideally Open is > ~1.6V (depends on Rp). */
-        *port_reg = base | CC_CMP_123; /* Max threshold */
+        /* Check > 1.23V (Open) */
+        *port_reg = test_cfg | CC_CMP_123;
         k_busy_wait(5);
-        
-        /* If voltage > 1.23V, it COUlD be Open or 3A Rd. 
-           Assuming 3A Rp is not used or distinguishing via other means. 
-           For Default/1.5A, Rd < 1.23V. */
         if (*port_reg & PA_CC_AI) {
-            return TC_CC_VOLT_OPEN;
+            res = TC_CC_VOLT_OPEN;
+            goto done;
         }
+        
+        /* Otherwise Rd */
+        res = TC_CC_VOLT_RD;
 
-        return TC_CC_VOLT_RD;
+done:
+        /* Restore original */
+        *port_reg = original_p;
+        return res;
     }
 }
 
@@ -161,7 +185,7 @@ static int tcpc_wch_get_cc(const struct device *dev, enum tc_cc_voltage_state *c
     *cc1 = tcpc_wch_measure_cc(pd, 1, p1);
     *cc2 = tcpc_wch_measure_cc(pd, 2, p2);
     
-    /* Restore settings (disable CMP to save power or default state?) */
+    /* Restore settings */
     pd->PORT_CC1 = p1;
     pd->PORT_CC2 = p2;
 
@@ -229,6 +253,7 @@ static int tcpc_wch_set_cc(const struct device *dev, enum tc_cc_pull pull)
 
 static int tcpc_wch_set_vconn(const struct device *dev, bool enable)
 {
+    /* Placeholder: VCONN not fully supported by this HW revision or requires external switch */
     return -ENOTSUP;
 }
 
@@ -250,21 +275,31 @@ static int tcpc_wch_set_vconn_discharge_cb(const struct device *dev, tcpc_vconn_
 static int tcpc_wch_set_roles(const struct device *dev, enum tc_power_role power_role,
                                    enum tc_data_role data_role)
 {
+    /* 
+     * The hardware doesn't maintain 'role' state automatically, 
+     * but GoodCRC responses might depend on it if hardware-accelerated.
+     * WCH PD PHY usually handles GoodCRC automatically based on received message commands.
+     * We don't need to explicitly set a bit for role unless using specific high-level features.
+     *
+     * However, if we need to swap Rp/Rd, that is done via set_cc.
+     */
     return 0;
 }
 
 static int tcpc_wch_get_rx_pending_msg(const struct device *dev, struct pd_msg *msg)
 {
     struct tcpc_wch_data *data = dev->data;
-    /* Determine length from cached or register? */
-    /* The ISR should have read the length. Use the buffer content. */
     /* Header is first 2 bytes */
     uint16_t header = *(uint16_t *)data->rx_buf;
     memcpy(&msg->header, &header, 2);
+    
     msg->len = PD_HEADER_CNT(header) * 4; 
     
-    memcpy(msg->data, &data->rx_buf[2], msg->len);
-    msg->type = PD_PACKET_SOP; // Configuring specifically for SOP for now. 
+    if (msg->len > 0) {
+        memcpy(msg->data, &data->rx_buf[2], msg->len);
+    }
+    
+    msg->type = PD_HEADER_TYPE(header);
     
     return 0;
 }
@@ -292,7 +327,9 @@ static int tcpc_wch_transmit_data(const struct device *dev, struct pd_msg *msg)
     /* Copy msg to tx_buf */
     /* Format: Header (2 bytes) + Data Objects */
     memcpy(data->tx_buf, &msg->header, 2);
-    memcpy(&data->tx_buf[2], msg->data, msg->len);
+    if (msg->len > 0) {
+        memcpy(&data->tx_buf[2], msg->data, msg->len);
+    }
     
     uint16_t total_len = 2 + msg->len;
 
@@ -336,9 +373,9 @@ static void tcpc_wch_isr(const struct device *dev)
 
     if (status & IF_TX_END) {
         /* TX Complete */
-        pd->USBPD_CONTROL &= ~PD_TX_EN; // Switch back to RX?
-        pd->USBPD_DMA = (uint32_t)data->rx_buf; // Reset DMA to RX buffer
-        pd->USBPD_STATUS = IF_TX_END; // Clear flag
+        pd->USBPD_CONTROL &= ~PD_TX_EN; 
+        pd->USBPD_DMA = (uint32_t)data->rx_buf; 
+        pd->USBPD_STATUS = IF_TX_END; 
         
         if (data->alert_cb) {
             data->alert_cb(dev, data->alert_data, TCPC_ALERT_TRANSMIT_MSG_SUCCESS);
@@ -347,11 +384,11 @@ static void tcpc_wch_isr(const struct device *dev)
 
     if (status & IF_RX_ACT) {
         /* RX Complete */
-        pd->USBPD_STATUS = IF_RX_ACT; // Clear flag
-        /* Check for errors? BUF_ERR? */
+        pd->USBPD_STATUS = IF_RX_ACT; 
+        
+        /* TODO: Check CRC/Status if available in registers */
         
         if (data->alert_cb) {
-             /* Assuming SOP for now */
             data->alert_cb(dev, data->alert_data, TCPC_ALERT_MSG_STATUS);
         }
     }
@@ -410,19 +447,18 @@ static const struct tcpc_driver_api tcpc_wch_driver_api = {
 };
 
 
-PINCTRL_DT_INST_DEFINE(0);
+#define TCPC_WCH_INIT(n)                                                        \
+    PINCTRL_DT_INST_DEFINE(n);                                                  \
+    static const struct tcpc_wch_config tcpc_wch_cfg_##n = {                    \
+        .base = DT_INST_REG_ADDR(n),                                            \
+        .pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),                              \
+        .clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                     \
+        .pclk_id = DT_INST_CLOCKS_CELL_BY_IDX(n, 0, id),                        \
+    };                                                                          \
+    static struct tcpc_wch_data tcpc_wch_data_##n;                              \
+    DEVICE_DT_INST_DEFINE(n, &tcpc_wch_init, NULL,                              \
+                          &tcpc_wch_data_##n, &tcpc_wch_cfg_##n,                \
+                          POST_KERNEL, CONFIG_USBC_TCPC_INIT_PRIORITY,          \
+                          &tcpc_wch_driver_api);
 
-static const struct tcpc_wch_config tcpc_wch_cfg = {
-    .base = DT_INST_REG_ADDR(0),
-    .pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(0),
-    .clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(0)),
-    .pclk_id = DT_INST_CLOCKS_CELL_BY_IDX(0, 0, id),
-};
-
-static struct tcpc_wch_data tcpc_wch_data;
-
-DEVICE_DT_INST_DEFINE(0, &tcpc_wch_init, NULL,
-                      &tcpc_wch_data, &tcpc_wch_cfg,
-                      POST_KERNEL, CONFIG_USBC_TCPC_INIT_PRIORITY,
-                      &tcpc_wch_driver_api);
-
+DT_INST_FOREACH_STATUS_OKAY(TCPC_WCH_INIT)

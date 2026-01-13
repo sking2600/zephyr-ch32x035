@@ -8,6 +8,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/irq.h>
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/drivers/clock_control.h>
 
 LOG_MODULE_REGISTER(udc_wch_usbhs, CONFIG_UDC_DRIVER_LOG_LEVEL);
 
@@ -231,13 +232,54 @@ static int wch_usbhs_init(const struct device *dev)
 	/* Enable clock */
 	RCC->AHBPCENR |= RCC_AHBPeriph_USBHS;
 	
-	/* Configure USBHS PLL: 8MHz HSE -> 480MHz PLL */
-	/* bits 24-26: DIV, 27: SRC(1=HSE), 28-29: REF(2=8M), 30: PLLEN, 31: USBHS_SEL(1=PLL) */
+	uint32_t hse_rate;
+	ret = clock_control_get_rate(cfg->clock_dev, (clock_control_subsys_t)(uintptr_t)cfg->clock_id, &hse_rate);
+	if (ret < 0) {
+		LOG_ERR("Failed to get HSE rate");
+		return ret;
+	}
+
+	/* Find divisor D such that HSE/D is 3, 4, 5, or 8 MHz */
+	uint32_t div = 0;
+	uint32_t ref = 0;
+	bool found = false;
+
+	for (uint32_t d = 1; d <= 8; d++) {
+		uint32_t freq = hse_rate / d;
+		if (freq == 8000000) {
+			div = d - 1;
+			ref = 2; /* 8M */
+			found = true;
+			break; /* Prefer 8M */
+		} else if (freq == 4000000 && !found) {
+			div = d - 1;
+			ref = 1; /* 4M */
+			found = true;
+		} else if (freq == 5000000 && !found) {
+			div = d - 1;
+			ref = 3; /* 5M */
+			found = true;
+		} else if (freq == 3000000 && !found) {
+			div = d - 1;
+			ref = 0; /* 3M */
+			found = true;
+		}
+	}
+
+	if (!found) {
+		LOG_ERR("Unsupported HSE frequency %u for USBHS PLL", hse_rate);
+		return -EINVAL;
+	}
+
+	LOG_INF("USBHS PLL: HSE %u / %u = %u MHz (Ref %u)", hse_rate, div + 1, hse_rate / (div + 1) / 1000000, ref);
+
+	/* Configure USBHS PLL */
+	/* bits 24-26: DIV, 27: SRC(1=HSE), 28-29: REF, 30: PLLEN, 31: USBHS_SEL(1=PLL) */
 	RCC->CFGR2 &= ~(RCC_USBHSDIV_MASK | RCC_USBHSPLLSRC | (3 << 28) | RCC_USBHSPLL | RCC_USBHSSRC);
-	RCC->CFGR2 |= (2 << 28) | RCC_USBHSPLLSRC; /* 8M Ref, HSE Source */
+	RCC->CFGR2 |= (div << 24) | (ref << 28) | RCC_USBHSPLLSRC;
 	RCC->CFGR2 |= RCC_USBHSPLL;
 	
-	/* Wait for USBHS PLL stability (bit 30 often reads back as status or we just wait) */
+	/* Wait for USBHS PLL stability */
 	k_busy_wait(1000); 
 	
 	RCC->CFGR2 |= RCC_USBHSSRC; /* Select PLL as source */
@@ -410,6 +452,8 @@ static int wch_usbhs_driver_init(const struct device *dev)
 		.base = DT_INST_REG_ADDR(n),				\
 		.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),		\
 		.irq_enable_func = wch_usbhs_irq_enable_##n,		\
+		.clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),	\
+		.clock_id = DT_INST_CLOCKS_CELL(n, id),			\
 	};								\
 	static struct udc_data udc_data_##n = {				\
 		.mutex = Z_MUTEX_INITIALIZER(udc_data_##n.mutex),	\

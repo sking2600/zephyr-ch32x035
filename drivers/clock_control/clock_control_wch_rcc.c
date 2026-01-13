@@ -65,6 +65,20 @@ static int clock_control_wch_rcc_on(const struct device *dev, clock_control_subs
 	return 0;
 }
 
+static int clock_control_wch_rcc_off(const struct device *dev, clock_control_subsys_t sys)
+{
+	const struct clock_control_wch_rcc_config *config = dev->config;
+	RCC_TypeDef *regs = config->regs;
+	uint8_t id = (uintptr_t)sys;
+	uint32_t reg = (uint32_t)(&regs->AHBPCENR + WCH_RCC_CLOCK_ID_OFFSET(id));
+	uint32_t val = sys_read32(reg);
+
+	val &= ~BIT(WCH_RCC_CLOCK_ID_BIT(id));
+	sys_write32(val, reg);
+
+	return 0;
+}
+
 static int clock_control_wch_rcc_get_rate(const struct device *dev, clock_control_subsys_t sys,
 					  uint32_t *rate)
 {
@@ -127,6 +141,7 @@ static void clock_control_wch_rcc_setup_flash(void)
 
 static DEVICE_API(clock_control, clock_control_wch_rcc_api) = {
 	.on = clock_control_wch_rcc_on,
+	.off = clock_control_wch_rcc_off,
 	.get_rate = clock_control_wch_rcc_get_rate,
 };
 

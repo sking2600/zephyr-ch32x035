@@ -1,0 +1,20 @@
+# Power Management Driver configuration options
+
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig PM_DRIVERS
+	bool "Power Management Drivers"
+	help
+	  Enable support for Power Management Drivers.
+
+if PM_DRIVERS
+
+config PM_WCH
+	bool "WCH Power Management [PWR] driver"
+	default y
+	depends on DT_HAS_WCH_PWR_ENABLED
+	help
+	  Enable support for the WCH Power Management [PWR] driver.
+
+endif # PM_DRIVERS

@@ -1,0 +1,9 @@
+description: WCH CH32V20x/30x flash controller
+
+compatible: "wch,ch32-flash-controller"
+
+include: flash-controller.yaml
+
+properties:
+  reg:
+    required: true

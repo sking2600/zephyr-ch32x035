@@ -11,9 +11,26 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/pm/device.h>
+
+#define WCH_ADC_PGA_1X 0
+#define WCH_ADC_PGA_4X ADC_PGA_0
+#define WCH_ADC_PGA_16X ADC_PGA_1
+#define WCH_ADC_PGA_64X ADC_PGA
+
+struct adc_wch_config {
+	ADC_TypeDef *regs;
+	const struct pinctrl_dev_config *pin_cfg;
+	const struct device *clock_dev;
+	uint32_t clock_id;
+#ifdef CONFIG_ADC_WCH_DMA
+	const struct device *dma_dev;
+	uint32_t dma_chan;
+#endif
+};
 
 struct adc_wch_data {
-	uint32_t gain[16];
+	uint32_t gain[18];
 };
 
 static int adc_wch_channel_setup(const struct device *dev,
@@ -24,16 +41,16 @@ static int adc_wch_channel_setup(const struct device *dev,
 
 	switch (channel_cfg->gain) {
 	case ADC_GAIN_1:
-		pga = 0;
+		pga = WCH_ADC_PGA_1X;
 		break;
 	case ADC_GAIN_4:
-		pga = 0x08000000;
+		pga = WCH_ADC_PGA_4X;
 		break;
 	case ADC_GAIN_16:
-		pga = 0x10000000;
+		pga = WCH_ADC_PGA_16X;
 		break;
 	case ADC_GAIN_64:
-		pga = 0x18000000;
+		pga = WCH_ADC_PGA_64X;
 		break;
 	default:
 		return -EINVAL;
@@ -48,7 +65,7 @@ static int adc_wch_channel_setup(const struct device *dev,
 	if (channel_cfg->differential) {
 		return -EINVAL;
 	}
-	if (channel_cfg->channel_id >= 16) {
+	if (channel_cfg->channel_id >= 18) {
 		return -EINVAL;
 	}
 
@@ -98,11 +115,25 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 	}
 
 	if (sequence->calibrate) {
+		uint32_t timeout = 1000; /* 10ms at 10us steps */
+
 		regs->CTLR2 |= ADC_RSTCAL;
-		while ((regs->CTLR2 & ADC_RSTCAL) != 0) {
+		while ((regs->CTLR2 & ADC_RSTCAL) != 0 && timeout > 0) {
+			k_busy_wait(10);
+			timeout--;
 		}
+		if (timeout == 0) {
+			return -EIO;
+		}
+
+		timeout = 1000;
 		regs->CTLR2 |= ADC_CAL;
-		while ((regs->CTLR2 & ADC_CAL) != 0) {
+		while ((regs->CTLR2 & ADC_CAL) != 0 && timeout > 0) {
+			k_busy_wait(10);
+			timeout--;
+		}
+		if (timeout == 0) {
+			return -EIO;
 		}
 	}
 
@@ -190,7 +221,7 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 			return err;
 		}
 
-		regs->CTLR2 |= ADC_SWSTART;
+		regs->CTLR2 |= ADC_RSWSTART;
 
 		k_sem_take(&dma_ctx.sem, K_FOREVER);
 
@@ -200,9 +231,16 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 	}
 #endif
 
-	regs->CTLR2 |= ADC_SWSTART;
+	regs->CTLR2 |= ADC_RSWSTART;
 	for (i = 0; i < total_channels; i++) {
-		while ((regs->STATR & ADC_EOC) == 0) {
+		uint32_t timeout = 100; /* 1ms at 10us steps */
+
+		while ((regs->STATR & ADC_EOC) == 0 && timeout > 0) {
+			k_busy_wait(10);
+			timeout--;
+		}
+		if (timeout == 0) {
+			return -EIO;
 		}
 		*samples++ = regs->RDATAR;
 	}
@@ -230,7 +268,7 @@ static int adc_wch_init(const struct device *dev)
 	regs->SAMPTR2 = ADC_SMP0_1 | ADC_SMP1_1 | ADC_SMP2_1 | ADC_SMP3_1 | ADC_SMP4_1 |
 			ADC_SMP5_1 | ADC_SMP6_1 | ADC_SMP7_1 | ADC_SMP8_1 | ADC_SMP9_1;
 
-	regs->CTLR2 = ADC_ADON | ADC_EXTSEL;
+	regs->CTLR2 = ADC_ADON | ADC_EXTSEL | ADC_TSVREFE;
 
 #if defined(ADC_PGA)
 	/* Default to Gain 1x if supported */
@@ -242,11 +280,45 @@ static int adc_wch_init(const struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM_DEVICE
+static int adc_wch_pm_action(const struct device *dev, enum pm_device_action action)
+{
+	const struct adc_wch_config *config = dev->config;
+	int err;
+
+	switch (action) {
+	case PM_DEVICE_ACTION_SUSPEND:
+		config->regs->CTLR2 &= ~ADC_ADON;
+		err = clock_control_off(config->clock_dev, (clock_control_subsys_t)(uintptr_t)config->clock_id);
+		if (err < 0) {
+			return err;
+		}
+		break;
+	case PM_DEVICE_ACTION_RESUME:
+		err = clock_control_on(config->clock_dev, (clock_control_subsys_t)(uintptr_t)config->clock_id);
+		if (err < 0) {
+			return err;
+		}
+		config->regs->CTLR2 |= ADC_ADON;
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+#endif
+
+
+#ifdef CONFIG_ADC_WCH_DMA
 #define ADC_WCH_DMA_NODE(n)						\
 	COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas),			\
 		(.dma_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR(n)),	\
 		 .dma_chan = DT_INST_DMAS_CELL(n, channel),),		\
 		())
+#else
+#define ADC_WCH_DMA_NODE(n)
+#endif
 
 #define ADC_WCH_DEVICE(n)                                                                     \
 	PINCTRL_DT_INST_DEFINE(n);                                                                 \
@@ -267,7 +339,8 @@ static int adc_wch_init(const struct device *dev)
 		ADC_WCH_DMA_NODE(n)								   \
 	};                                                                                         \
                                                                                                    \
-	DEVICE_DT_INST_DEFINE(n, adc_wch_init, NULL, &adc_wch_data_##n, &adc_wch_config_##n,          \
+	PM_DEVICE_DT_INST_DEFINE(n, adc_wch_pm_action);                                            \
+	DEVICE_DT_INST_DEFINE(n, adc_wch_init, PM_DEVICE_DT_INST_GET(n), &adc_wch_data_##n, &adc_wch_config_##n, \
 			      POST_KERNEL, CONFIG_ADC_INIT_PRIORITY, &adc_wch_api_##n);
 
 DT_INST_FOREACH_STATUS_OKAY(ADC_WCH_DEVICE)

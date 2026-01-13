@@ -259,6 +259,19 @@ static inline void wch_usbfs_ep_set_mod(WCH_USBFS_RegDef *usb, uint8_t ep_idx, b
 
 #define USBFS_EP_NUM 8
 
+enum usbfs_wch_event {
+	USBFS_WCH_SETUP,
+	USBFS_WCH_OUT,
+	USBFS_WCH_IN,
+	USBFS_WCH_SOF,
+};
+
+struct usbfs_wch_msg {
+	enum usbfs_wch_event type;
+	uint8_t ep;
+	uint16_t rx_count;
+};
+
 struct wch_usbfs_ep_state {
 	uint16_t mps;
 	uint8_t type;
@@ -267,7 +280,10 @@ struct wch_usbfs_ep_state {
 struct wch_usbfs_data {
 	struct udc_data data;
 	struct wch_usbfs_ep_state eps[USBFS_EP_NUM * 2]; /* IN and OUT */
-	struct k_work work;
+	struct k_thread thread_data;
+	struct k_msgq msgq;
+	char msgq_buf[8 * sizeof(struct usbfs_wch_msg)];
+	K_KERNEL_STACK_MEMBER(thread_stack, 1024);
 	uint8_t setup_buf[8] __aligned(4);
 };
 

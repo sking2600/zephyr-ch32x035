@@ -1,0 +1,13 @@
+/ {
+	aliases {
+		counter0 = &lptim;
+	};
+};
+
+&pwr {
+	status = "okay";
+};
+
+&lptim {
+	status = "okay";
+};

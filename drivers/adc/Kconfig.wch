@@ -2,11 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
 config ADC_WCH
-	bool "WCH ADC Driver"
+	bool "WCH CH32 ADC driver"
 	default y
 	depends on DT_HAS_WCH_ADC_ENABLED
+	select ADC_CONTEXT_NET_PKT_BUFFER
 	help
-	  Enable the WCH family Analog-to-Digital Converter (ADC) driver.
+	  Enable WCH CH32 ADC driver.
+
+config ADC_WCH_TOUCHKEY
+	bool "WCH CH32 Touchkey driver"
+	default y
+	depends on DT_HAS_WCH_CH32_TOUCHKEY_ENABLED
+	select ADC_CONTEXT_NET_PKT_BUFFER
+	help
+	  Enable WCH CH32 Touchkey driver.
 
 config ADC_WCH_DMA
 	bool "WCH ADC DMA support"

@@ -131,9 +131,71 @@ static int pwm_wch_gptm_get_cycles_per_sec(const struct device *dev, uint32_t ch
 	return 0;
 }
 
+#ifdef CONFIG_PWM_WITH_DMA
+static int pwm_wch_gptm_enable_dma(const struct device *dev, uint32_t channel)
+{
+	const struct pwm_wch_gptm_config *config = dev->config;
+	TIM_TypeDef *regs = config->regs;
+
+	if (channel < 1 || channel > 4) {
+		return -EINVAL;
+	}
+
+	/* Map channel to DMA request enable bit (TIM_DMA_CCx) */
+	/* TIM_DMA_CC1 is 0x0200 (Bit 9), CC2 is 0x0400, etc. */
+	switch (channel) {
+	case 1:
+		regs->DMAINTENR |= TIM_DMA_CC1;
+		break;
+	case 2:
+		regs->DMAINTENR |= TIM_DMA_CC2;
+		break;
+	case 3:
+		regs->DMAINTENR |= TIM_DMA_CC3;
+		break;
+	case 4:
+		regs->DMAINTENR |= TIM_DMA_CC4;
+		break;
+	}
+
+	return 0;
+}
+
+static int pwm_wch_gptm_disable_dma(const struct device *dev, uint32_t channel)
+{
+	const struct pwm_wch_gptm_config *config = dev->config;
+	TIM_TypeDef *regs = config->regs;
+
+	if (channel < 1 || channel > 4) {
+		return -EINVAL;
+	}
+
+	switch (channel) {
+	case 1:
+		regs->DMAINTENR &= ~TIM_DMA_CC1;
+		break;
+	case 2:
+		regs->DMAINTENR &= ~TIM_DMA_CC2;
+		break;
+	case 3:
+		regs->DMAINTENR &= ~TIM_DMA_CC3;
+		break;
+	case 4:
+		regs->DMAINTENR &= ~TIM_DMA_CC4;
+		break;
+	}
+
+	return 0;
+}
+#endif /* CONFIG_PWM_WITH_DMA */
+
 static DEVICE_API(pwm, pwm_wch_gptm_driver_api) = {
 	.set_cycles = pwm_wch_gptm_set_cycles,
 	.get_cycles_per_sec = pwm_wch_gptm_get_cycles_per_sec,
+#ifdef CONFIG_PWM_WITH_DMA
+	.enable_dma = pwm_wch_gptm_enable_dma,
+	.disable_dma = pwm_wch_gptm_disable_dma,
+#endif
 };
 
 static int pwm_wch_gptm_init(const struct device *dev)

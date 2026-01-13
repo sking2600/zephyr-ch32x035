@@ -52,4 +52,10 @@
             drive-open-drain;
         };
     };
+
+    tim1_default: tim1_default {
+        group1 {
+            pinmux = <TIM1_CH1_PA8_0>;
+        };
+    };
 };

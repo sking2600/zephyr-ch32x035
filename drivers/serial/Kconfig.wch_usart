@@ -2,11 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
 config UART_WCH_USART
-	bool "CH32V00x USART driver"
+	bool "WCH USART driver"
 	default y
 	depends on DT_HAS_WCH_USART_ENABLED
 	select SERIAL_HAS_DRIVER
 	select SERIAL_SUPPORT_INTERRUPT
+	select SERIAL_SUPPORT_ASYNC
 	select PINCTRL
 	help
-	  This option enables the USART driver for CH32V00x SoC family.
+	  This option enables the USART driver for WCH SoC families.
+
+config UART_WCH_USART_DMA
+	bool "DMA support for WCH USART driver"
+	depends on UART_WCH_USART
+	select DMA
+	select UART_ASYNC_API
+	help
+	  This option enables the DMA support for the USART driver.

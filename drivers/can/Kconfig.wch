@@ -1,0 +1,20 @@
+# Copyright (c) 2025 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+config CAN_WCH
+	bool "WCH CAN Driver"
+	default y
+	depends on DT_HAS_WCH_CH32_CAN_ENABLED
+	help
+	  Enable the WCH CH32 CAN driver.
+
+if CAN_WCH
+
+config CAN_MAX_FILTER
+	int "Maximum number of concurrent active filters"
+	default 5
+	range 1 14
+	help
+	  Defines the maximum number of concurrent active filters.
+
+endif

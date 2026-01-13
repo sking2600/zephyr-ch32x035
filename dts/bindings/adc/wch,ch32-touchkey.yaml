@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH CH32 Touchkey Controller (reusing ADC)
+
+compatible: "wch,ch32-touchkey"
+
+include: adc-controller.yaml
+
+properties:
+  reg:
+    required: true
+
+  clocks:
+    required: true
+
+  interrupts:
+    required: false
+
+  "#io-channel-cells":
+    const: 1
+
+io-channel-cells:
+  - input

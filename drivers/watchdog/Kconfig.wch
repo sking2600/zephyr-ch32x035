@@ -1,10 +1,13 @@
-# Copyright (c) 2025 Michael Hope <michaelh@juju.nz>
-# SPDX-License-Identifier: Apache-2.0
-
-config WDT_IWDG_WCH
-	bool "WCH Independent Watchdog (IWDG) driver"
+config WDT_WCH_IWDG
+	bool "WCH Independent Watchdog (IWDG) Driver"
 	default y
-	depends on DT_HAS_WCH_IWDG_ENABLED
+	depends on DT_HAS_WCH_CH32_WATCHDOG_ENABLED
 	help
-	  Enable the Independent Watchdog (IWDG) driver. Tested on the
-	  CH32V003 and CH32V208.
+	  Enable IWDG driver for WCH CH32 MCUs.
+
+config WDT_WCH_WWDG
+	bool "WCH Window Watchdog (WWDG) Driver"
+	default y
+	depends on DT_HAS_WCH_CH32_WWDG_ENABLED
+	help
+	  Enable WWDG driver for WCH CH32 MCUs.

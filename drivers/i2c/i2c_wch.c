@@ -16,6 +16,7 @@ LOG_MODULE_REGISTER(i2c_wch);
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/device.h>
+#include <zephyr/pm/device.h>
 
 #include "i2c-priv.h"
 
@@ -56,6 +57,9 @@ struct i2c_wch_data {
 			uint16_t: 16;
 		};
 	} current;
+#ifdef CONFIG_I2C_TARGET
+	struct i2c_target_config *target_cfg;
+#endif
 };
 
 #ifdef CONFIG_I2C_WCH_DMA
@@ -114,12 +118,35 @@ static void wch_i2c_handle_start_bit(const struct device *dev)
 	struct i2c_wch_data *data = dev->data;
 	I2C_TypeDef *regs = config->regs;
 
-	if ((data->current.msg->flags & I2C_MSG_RW_MASK) == I2C_MSG_WRITE) {
-		regs->DATAR = ((data->current.addr << 1) & 0xFF);
+	bool is_10bit = (data->current.msg->flags & I2C_MSG_ADDR_10_BITS);
+
+	if (is_10bit) {
+		if ((data->current.msg->flags & I2C_MSG_RW_MASK) == I2C_MSG_WRITE ||
+		    (first_msg || (data->current.msg->flags & I2C_MSG_RESTART))) {
+			/* First part of 10-bit addr or repeated start read header */
+			uint8_t header = 0xF0 | ((data->current.addr >> 7) & 0x06);
+			if ((data->current.msg->flags & I2C_MSG_RW_MASK) == I2C_MSG_READ &&
+			    !(first_msg || (data->current.msg->flags & I2C_MSG_RESTART))) {
+				/* This case shouldn't happen with standard Zephyr I2C usage but let's be safe */
+				header |= 1;
+			}
+			/* For 10-bit READ with RESTART, the second header should have R bit set */
+			if ((data->current.msg->flags & I2C_MSG_RW_MASK) == I2C_MSG_READ) {
+				header |= 1;
+			}
+			regs->DATAR = header;
+		} else {
+			/* Standard read header for 10-bit is handled by RESTART case above */
+			regs->DATAR = ((data->current.addr << 1) & 0xFF) | 1;
+		}
 	} else {
-		regs->DATAR = ((data->current.addr << 1) & 0xFF) | 1;
-		if (data->current.msg->len == 2U) {
-			regs->CTLR1 |= I2C_CTLR1_POS;
+		if ((data->current.msg->flags & I2C_MSG_RW_MASK) == I2C_MSG_WRITE) {
+			regs->DATAR = ((data->current.addr << 1) & 0xFF);
+		} else {
+			regs->DATAR = ((data->current.addr << 1) & 0xFF) | 1;
+			if (data->current.msg->len == 2U) {
+				regs->CTLR1 |= I2C_CTLR1_POS;
+			}
 		}
 	}
 }
@@ -245,12 +272,51 @@ static void i2c_wch_event_isr(const struct device *dev)
 	struct i2c_wch_data *data = dev->data;
 	I2C_TypeDef *regs = config->regs;
 	uint16_t status = regs->STAR1;
+	uint16_t status2 = regs->STAR2;
 	bool write;
+
+	if (!(status2 & I2C_STAR2_MSL)) {
+#ifdef CONFIG_I2C_TARGET
+		if (data->target_cfg) {
+			uint8_t val;
+			if (status & I2C_STAR1_ADDR) {
+				if (status2 & I2C_STAR2_TRA) {
+					if (data->target_cfg->callbacks->read_requested) {
+						data->target_cfg->callbacks->read_requested(data->target_cfg, &val);
+						regs->DATAR = val;
+					}
+				} else {
+					if (data->target_cfg->callbacks->write_requested) {
+						data->target_cfg->callbacks->write_requested(data->target_cfg);
+					}
+				}
+			} else if (status & I2C_STAR1_RXNE) {
+				val = regs->DATAR;
+				if (data->target_cfg->callbacks->write_received) {
+					data->target_cfg->callbacks->write_received(data->target_cfg, val);
+				}
+			} else if (status & I2C_STAR1_TXE) {
+				if (data->target_cfg->callbacks->read_processed) {
+					data->target_cfg->callbacks->read_processed(data->target_cfg, &val);
+					regs->DATAR = val;
+				}
+			} else if (status & I2C_STAR1_STOPF) {
+				regs->CTLR1 = regs->CTLR1; /* Clear STOPF */
+				if (data->target_cfg->callbacks->stop) {
+					data->target_cfg->callbacks->stop(data->target_cfg);
+				}
+			}
+		}
+#endif
+		return;
+	}
 
 	write = ((data->current.msg->flags & I2C_MSG_RW_MASK) == I2C_MSG_WRITE);
 
 	if (status & I2C_STAR1_SB) {
 		wch_i2c_handle_start_bit(dev);
+	} else if (status & I2C_STAR1_ADD10) {
+		regs->DATAR = (uint8_t)(data->current.addr & 0xFF);
 	} else if (status & I2C_STAR1_ADDR) {
 		wch_i2c_handle_addr(dev);
 	} else if ((status & (I2C_STAR1_TXE | I2C_STAR1_BTF)) && write) {
@@ -361,10 +427,13 @@ static void wch_i2c_finish_transfer(const struct device *dev)
 {
 	const struct i2c_wch_config *config = dev->config;
 	I2C_TypeDef *regs = config->regs;
+	uint32_t timeout = 1000; /* 10ms */
 
 	wch_i2c_config_interrupts(regs, false);
 
-	while (regs->STAR2 & I2C_STAR2_BUSY) {
+	while ((regs->STAR2 & I2C_STAR2_BUSY) && timeout > 0) {
+		k_busy_wait(10);
+		timeout--;
 	}
 
 	regs->CTLR1 &= ~I2C_CTLR1_PE;
@@ -423,7 +492,7 @@ static int i2c_wch_configure(const struct device *dev, uint32_t dev_config)
 	}
 
 	if (dev_config & I2C_ADDR_10_BITS) {
-		return -ENOTSUP;
+		/* 10-bit support implemented in ISR/Start logic */
 	}
 
 	clk_sys = (clock_control_subsys_t)(uintptr_t)config->clk_id;
@@ -469,6 +538,55 @@ static int i2c_wch_transfer(const struct device *dev, struct i2c_msg *msg,
 	return ret;
 }
 
+#ifdef CONFIG_I2C_TARGET
+static int i2c_wch_target_register(const struct device *dev,
+				   struct i2c_target_config *cfg)
+{
+	struct i2c_wch_data *data = dev->data;
+	const struct i2c_wch_config *config = dev->config;
+	I2C_TypeDef *regs = config->regs;
+
+	if (!cfg) {
+		return -EINVAL;
+	}
+
+	if (data->target_cfg) {
+		return -EBUSY;
+	}
+
+	data->target_cfg = cfg;
+
+	regs->CTLR1 &= ~I2C_CTLR1_PE;
+	regs->OAR1 = (cfg->address << 1) | (cfg->flags & I2C_TARGET_FLAGS_ADDR_10_BITS ? I2C_OAR1_ADDMODE : 0);
+	regs->CTLR1 |= I2C_CTLR1_PE;
+	regs->CTLR1 |= I2C_CTLR1_ACK;
+	regs->CTLR1 |= I2C_CTLR1_ACK;
+	regs->CTLR2 |= (I2C_CTLR2_ITERREN | I2C_CTLR2_ITEVTEN | I2C_CTLR2_ITBUFEN);
+
+	return 0;
+}
+
+static int i2c_wch_target_unregister(const struct device *dev,
+					   struct i2c_target_config *cfg)
+{
+	struct i2c_wch_data *data = dev->data;
+	const struct i2c_wch_config *config = dev->config;
+	I2C_TypeDef *regs = config->regs;
+
+	if (data->target_cfg != cfg) {
+		return -EINVAL;
+	}
+
+	data->target_cfg = NULL;
+
+	regs->CTLR1 &= ~I2C_CTLR1_PE;
+	regs->OAR1 = 0;
+	regs->CTLR1 |= I2C_CTLR1_PE;
+
+	return 0;
+}
+#endif
+
 static int i2c_wch_init(const struct device *dev)
 {
 	const struct i2c_wch_config *config = dev->config;
@@ -503,9 +621,42 @@ static int i2c_wch_init(const struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM_DEVICE
+static int i2c_wch_pm_action(const struct device *dev, enum pm_device_action action)
+{
+	const struct i2c_wch_config *config = dev->config;
+	int err;
+
+	switch (action) {
+	case PM_DEVICE_ACTION_SUSPEND:
+		config->regs->CTLR1 &= ~I2C_CTLR1_PE;
+		err = clock_control_off(config->clk_dev, (clock_control_subsys_t)(uintptr_t)config->clk_id);
+		if (err < 0) {
+			return err;
+		}
+		break;
+	case PM_DEVICE_ACTION_RESUME:
+		err = clock_control_on(config->clk_dev, (clock_control_subsys_t)(uintptr_t)config->clk_id);
+		if (err < 0) {
+			return err;
+		}
+		config->regs->CTLR1 |= I2C_CTLR1_PE;
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+#endif
+
 static DEVICE_API(i2c, i2c_wch_api) = {
 	.configure = i2c_wch_configure,
 	.transfer = i2c_wch_transfer,
+#ifdef CONFIG_I2C_TARGET
+	.target_register = i2c_wch_target_register,
+	.target_unregister = i2c_wch_target_unregister,
+#endif
 #ifdef CONFIG_I2C_RTIO
 	.iodev_submit = i2c_iodev_submit_fallback,
 #endif
@@ -535,7 +686,9 @@ static DEVICE_API(i2c, i2c_wch_api) = {
 											\
 	static struct i2c_wch_data i2c_wch_data_##inst;					\
 											\
-	I2C_DEVICE_DT_INST_DEFINE(inst, i2c_wch_init, NULL, &i2c_wch_data_##inst,	\
+	PM_DEVICE_DT_INST_DEFINE(inst, i2c_wch_pm_action);					\
+											\
+	I2C_DEVICE_DT_INST_DEFINE(inst, i2c_wch_init, PM_DEVICE_DT_INST_GET(inst), &i2c_wch_data_##inst, \
 				 &i2c_wch_cfg_##inst, PRE_KERNEL_1,			\
 				 CONFIG_I2C_INIT_PRIORITY, &i2c_wch_api);		\
 											\

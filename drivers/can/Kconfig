@@ -134,6 +134,7 @@ source "drivers/can/Kconfig.native_linux"
 source "drivers/can/Kconfig.nrf"
 source "drivers/can/Kconfig.numaker"
 source "drivers/can/Kconfig.nxp_s32"
+source "drivers/can/Kconfig.wch"
 source "drivers/can/Kconfig.rcar"
 source "drivers/can/Kconfig.renesas_ra"
 source "drivers/can/Kconfig.renesas_rz"
@@ -142,7 +143,7 @@ source "drivers/can/Kconfig.sam0"
 source "drivers/can/Kconfig.sja1000"
 source "drivers/can/Kconfig.stm32"
 source "drivers/can/Kconfig.tcan4x5x"
-source "drivers/can/Kconfig.xmc4xxx"
+source "drivers/can/Kconfig.wch"
 # zephyr-keep-sorted-stop
 
 endif # CAN

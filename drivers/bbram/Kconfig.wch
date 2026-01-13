@@ -1,0 +1,9 @@
+# Copyright (c) 2024 WCH
+# SPDX-License-Identifier: Apache-2.0
+
+config BBRAM_WCH
+	bool "WCH BKP (Batter-backed registers) driver"
+	default y
+	depends on DT_HAS_WCH_CH32_BBRAM_ENABLED
+	help
+	  Enable the WCH Battery-Backed RAM driver.

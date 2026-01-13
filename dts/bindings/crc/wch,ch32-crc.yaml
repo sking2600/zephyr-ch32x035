@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH CH32 CRC Calculation Unit
+
+compatible: "wch,ch32-crc"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+
+  clocks:
+    required: true

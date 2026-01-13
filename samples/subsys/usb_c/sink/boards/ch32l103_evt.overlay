@@ -1,0 +1,32 @@
+#include <zephyr/dt-bindings/usb-c/pd.h>
+
+/ {
+	usbc {
+		port0: port0 {
+			compatible = "usb-c-connector";
+			power-role = "sink";
+			data-role = "device";
+			tcpc = <&usbpd>;
+			sink-pdos = <PDO_FIXED(5000, 500, PDO_FIXED_USB_COMM)>;
+		};
+	};
+
+	aliases {
+		usbc-port0 = &port0;
+	};
+
+    vbus0: vbus {
+        compatible = "zephyr,usb-c-vbus-adc";
+        io-channels = <&adc1 0>;
+        output-ohms = <10000>;
+        full-ohms = <20000>;
+    };
+};
+
+&port0 {
+    vbus = <&vbus0>;
+};
+
+&i2c1 {
+    status = "disabled";
+};

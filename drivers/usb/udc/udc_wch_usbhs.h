@@ -271,7 +271,8 @@ struct wch_usbhs_config {
 	uint32_t base;
 	const struct pinctrl_dev_config *pcfg;
 	void (*irq_enable_func)(const struct device *dev);
-	int (*clock_enable_func)(const struct device *dev);
+	const struct device *clock_dev;
+	uint32_t clock_id;
 };
 
 #endif /* ZEPHYR_DRIVERS_USB_UDC_UDC_WCH_USBHS_H_ */

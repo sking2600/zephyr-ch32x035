@@ -38,6 +38,7 @@ source "drivers/bbram/Kconfig.microchip"
 source "drivers/bbram/Kconfig.npcx"
 source "drivers/bbram/Kconfig.rts5912"
 source "drivers/bbram/Kconfig.stm32"
+source "drivers/bbram/Kconfig.wch"
 source "drivers/bbram/Kconfig.xec"
 # zephyr-keep-sorted-stop
 

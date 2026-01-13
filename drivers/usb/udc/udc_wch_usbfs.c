@@ -8,6 +8,8 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/irq.h>
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/dt-bindings/clock/ch32l103_clock.h>
 
 LOG_MODULE_REGISTER(udc_wch_usbfs, CONFIG_UDC_DRIVER_LOG_LEVEL);
 
@@ -15,8 +17,18 @@ LOG_MODULE_REGISTER(udc_wch_usbfs, CONFIG_UDC_DRIVER_LOG_LEVEL);
 #define DT_DRV_COMPAT wch_usbfs
 #endif
 
+static void wch_usbfs_thread_handler(void *arg1, void *arg2, void *arg3);
 
+static int wch_usbfs_clock_on(const struct device *dev)
+{
+	const struct device *rcc = DEVICE_DT_GET(DT_NODELABEL(rcc));
 
+	if (!device_is_ready(rcc)) {
+		return -ENODEV;
+	}
+
+	return clock_control_on(rcc, (clock_control_subsys_t)RCC_AHB_USBFS);
+}
 
 static int wch_usbfs_ep_enqueue(const struct device *dev,
 				struct udc_ep_config *cfg,
@@ -294,6 +306,13 @@ static int wch_usbfs_init(const struct device *dev)
 	/* Initialize Control EP0 */
 	usb->UEP0_TX_LEN = 0;
 
+	/* Start worker thread */
+	k_thread_create(&priv->thread_data, priv->thread_stack,
+			K_KERNEL_STACK_SIZEOF(priv->thread_stack),
+			wch_usbfs_thread_handler,
+			(void *)dev, NULL, NULL,
+			K_PRIO_COOP(2), 0, K_NO_WAIT);
+
 	return 0;
 }
 
@@ -334,10 +353,13 @@ static const struct udc_api wch_usbfs_api = {
 static int wch_usbfs_driver_init(const struct device *dev)
 {
 	struct udc_data *data = dev->data;
+	struct wch_usbfs_data *priv = udc_get_private(dev);
 	const struct wch_usbfs_config *cfg = dev->config;
 	int i;
 
 	k_mutex_init(&data->mutex);
+	k_msgq_init(&priv->msgq, priv->msgq_buf, sizeof(struct usbfs_wch_msg), 8);
+
 	data->caps.rwup = 1;
 	data->caps.mps0 = UDC_MPS0_64;
 
@@ -381,48 +403,146 @@ static void wch_usbfs_isr_transfer(const struct device *dev)
 	uint8_t ep_idx = intst & WCH_USBFS_UIS_ENDP_MASK;
 	uint8_t token = intst & WCH_USBFS_UIS_TOKEN_MASK;
 	struct wch_usbfs_data *priv = udc_get_private(dev);
-	struct udc_ep_config *ep_cfg;
-	struct net_buf *buf;
+	struct usbfs_wch_msg msg;
+
+	msg.ep = ep_idx;
+	msg.rx_count = 0;
 
 	switch (token) {
 	case WCH_USBFS_UIS_TOKEN_SETUP:
-		/* EP0 Setup */
-		LOG_DBG("SETUP ep 0");
-		buf = udc_ctrl_alloc(dev, USB_CONTROL_EP_OUT, 8);
-		if (buf) {
-			udc_ep_buf_set_setup(buf);
-			net_buf_add_mem(buf, priv->setup_buf, 8);
-			udc_ctrl_update_stage(dev, buf);
-		}
+		msg.type = USBFS_WCH_SETUP;
 		break;
-
 	case WCH_USBFS_UIS_TOKEN_IN:
-		LOG_DBG("IN ep %d", ep_idx);
-		ep_cfg = udc_get_ep_cfg(dev, USB_EP_DIR_IN | ep_idx);
-		buf = udc_buf_get(ep_cfg);
-		udc_ep_set_busy(ep_cfg, false);
-		if (buf) {
-			udc_submit_ep_event(dev, buf, 0);
-		}
+		msg.type = USBFS_WCH_IN;
 		break;
-
 	case WCH_USBFS_UIS_TOKEN_OUT:
-		LOG_DBG("OUT ep %d", ep_idx);
-		ep_cfg = udc_get_ep_cfg(dev, USB_EP_DIR_OUT | ep_idx);
-		buf = udc_buf_get(ep_cfg);
-		udc_ep_set_busy(ep_cfg, false);
-		if (buf) {
-			uint16_t rx_len = usb->RX_LEN;
-			net_buf_add(buf, rx_len);
+		msg.type = USBFS_WCH_OUT;
+		msg.rx_count = usb->RX_LEN;
+		break;
+	case WCH_USBFS_UIS_TOKEN_SOF:
+		msg.type = USBFS_WCH_SOF;
+		break;
+	default:
+		usb->INT_FG = WCH_USBFS_UIF_TRANSFER;
+		return;
+	}
+
+	k_msgq_put(&priv->msgq, &msg, K_NO_WAIT);
+	usb->INT_FG = WCH_USBFS_UIF_TRANSFER;
+}
+
+static void handle_setup(const struct device *dev)
+{
+	struct wch_usbfs_data *priv = udc_get_private(dev);
+	struct net_buf *buf;
+
+	/* Drop any pending EP0 buffers */
+	buf = udc_buf_get_all(udc_get_ep_cfg(dev, USB_CONTROL_EP_OUT));
+	if (buf) {
+		net_buf_unref(buf);
+	}
+	buf = udc_buf_get_all(udc_get_ep_cfg(dev, USB_CONTROL_EP_IN));
+	if (buf) {
+		net_buf_unref(buf);
+	}
+
+	buf = udc_ctrl_alloc(dev, USB_CONTROL_EP_OUT, 8);
+	if (buf) {
+		udc_ep_buf_set_setup(buf);
+		net_buf_add_mem(buf, priv->setup_buf, 8);
+		udc_ctrl_update_stage(dev, buf);
+
+		if (udc_ctrl_stage_is_data_in(dev)) {
+			udc_ctrl_submit_s_in_status(dev);
+		} else if (udc_ctrl_stage_is_data_out(dev)) {
+			/* Prepare for data stage */
+		} else {
+			udc_ctrl_submit_s_status(dev);
+		}
+	}
+}
+
+static void handle_transfer_in(const struct device *dev, uint8_t ep_idx)
+{
+	struct udc_ep_config *ep_cfg;
+	struct net_buf *buf;
+
+	ep_cfg = udc_get_ep_cfg(dev, USB_EP_DIR_IN | ep_idx);
+	buf = udc_buf_peek(ep_cfg);
+	if (buf) {
+		if (ep_idx == 0) {
+			if (udc_ctrl_stage_is_status_in(dev) ||
+			    udc_ctrl_stage_is_no_data(dev)) {
+				udc_ctrl_submit_status(dev, buf);
+			}
+			udc_ctrl_update_stage(dev, buf);
+			udc_buf_get(ep_cfg);
+			udc_ep_set_busy(ep_cfg, false);
+			
+			if (udc_ctrl_stage_is_status_out(dev)) {
+				net_buf_unref(buf);
+			}
+		} else {
+			udc_buf_get(ep_cfg);
+			udc_ep_set_busy(ep_cfg, false);
 			udc_submit_ep_event(dev, buf, 0);
 		}
-		break;
-		
-	case WCH_USBFS_UIS_TOKEN_SOF:
-		break;
 	}
-	
-	usb->INT_FG = WCH_USBFS_UIF_TRANSFER;
+}
+
+static void handle_transfer_out(const struct device *dev, uint8_t ep_idx, uint16_t rx_len)
+{
+	struct udc_ep_config *ep_cfg;
+	struct net_buf *buf;
+
+	ep_cfg = udc_get_ep_cfg(dev, USB_EP_DIR_OUT | ep_idx);
+	buf = udc_buf_peek(ep_cfg);
+	if (buf) {
+		net_buf_add(buf, rx_len);
+		if (ep_idx == 0) {
+			if (udc_ctrl_stage_is_status_out(dev)) {
+				udc_ctrl_update_stage(dev, buf);
+				udc_ctrl_submit_status(dev, buf);
+			} else {
+				udc_ctrl_update_stage(dev, buf);
+				udc_ctrl_submit_s_out_status(dev, buf);
+			}
+			udc_buf_get(ep_cfg);
+			udc_ep_set_busy(ep_cfg, false);
+		} else {
+			udc_buf_get(ep_cfg);
+			udc_ep_set_busy(ep_cfg, false);
+			udc_submit_ep_event(dev, buf, 0);
+		}
+	}
+}
+
+static void wch_usbfs_thread_handler(void *arg1, void *arg2, void *arg3)
+{
+	const struct device *dev = arg1;
+	struct wch_usbfs_data *priv = udc_get_private(dev);
+	struct usbfs_wch_msg msg;
+
+	while (1) {
+		k_msgq_get(&priv->msgq, &msg, K_FOREVER);
+
+		switch (msg.type) {
+		case USBFS_WCH_SETUP:
+			handle_setup(dev);
+			break;
+		case USBFS_WCH_IN:
+			handle_transfer_in(dev, msg.ep);
+			break;
+		case USBFS_WCH_OUT:
+			handle_transfer_out(dev, msg.ep, msg.rx_count);
+			break;
+		case USBFS_WCH_SOF:
+			udc_submit_sof_event(dev);
+			break;
+		default:
+			break;
+		}
+	}
 }
 
 static void wch_usbfs_isr(const struct device *dev)
@@ -479,7 +599,7 @@ static void wch_usbfs_isr(const struct device *dev)
 		.base = DT_INST_REG_ADDR(n),				\
 		.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),		\
 		.irq_enable_func = wch_usbfs_irq_enable_##n,		\
-		.clock_enable_func = NULL, /* TODO */			\
+		.clock_enable_func = wch_usbfs_clock_on,		\
 	};								\
 									\
 	static struct udc_data udc_data_##n = {				\

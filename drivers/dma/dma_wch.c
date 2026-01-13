@@ -7,6 +7,7 @@
 
 #include <zephyr/drivers/dma.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/pm/device.h>
 
 #include <hal_ch32fun.h>
 
@@ -88,6 +89,33 @@ static int dma_wch_init(const struct device *dev)
 	config->irq_config_func(dev);
 	return 0;
 }
+
+#ifdef CONFIG_PM_DEVICE
+static int dma_wch_pm_action(const struct device *dev, enum pm_device_action action)
+{
+	const struct dma_wch_config *config = dev->config;
+	int err;
+
+	switch (action) {
+	case PM_DEVICE_ACTION_SUSPEND:
+		err = clock_control_off(config->clock_dev, (clock_control_subsys_t)(uintptr_t)config->clock_id);
+		if (err < 0) {
+			return err;
+		}
+		break;
+	case PM_DEVICE_ACTION_RESUME:
+		err = clock_control_on(config->clock_dev, (clock_control_subsys_t)(uintptr_t)config->clock_id);
+		if (err < 0) {
+			return err;
+		}
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+#endif
 
 /* Converts a transfer width in bytes to the corresponding bitfield */
 static uint16_t dma_wch_width_index(uint32_t bytes)
@@ -504,7 +532,8 @@ LISTIFY(DMA_WCH_MAX_CHAN, GENERATE_ISR, ())
 		.channels = dma_wch##idx##_channels,                                               \
 	};                                                                                         \
                                                                                                    \
-	DEVICE_DT_INST_DEFINE(idx, dma_wch_init, NULL, &dma_wch##idx##_data,                       \
+	PM_DEVICE_DT_INST_DEFINE(idx, dma_wch_pm_action);                                 \
+	DEVICE_DT_INST_DEFINE(idx, dma_wch_init, PM_DEVICE_DT_INST_GET(idx), &dma_wch##idx##_data, \
 			      &dma_wch##idx##_config, PRE_KERNEL_1, CONFIG_DMA_INIT_PRIORITY,      \
 			      &dma_wch_driver_api);
 

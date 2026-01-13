@@ -63,7 +63,8 @@
 		};
 
 		flash: flash-controller@40022000 {
-			compatible = "wch,ch32v20x_30x-flash-controller";
+			compatible = "wch,ch32-flash-controller";
+			status = "okay";
 			reg = <0x40022000 0x400>;
 
 			#address-cells = <1>;
@@ -72,12 +73,18 @@
 			flash0: flash@8000000 {
 				compatible = "soc-nv-flash";
 				reg = <0x08000000 DT_SIZE_K(64)>;
+				erase-block-size = <256>;
+				write-block-size = <4>;
 			};
 		};
 
 		pwr: pwr@40007000 {
 			compatible = "wch,pwr";
 			reg = <0x40007000 0x10>;
+			clocks = <&rcc RCC_APB1_PWR>;
+			interrupt-parent = <&pfic>;
+			interrupts = <17>; /* PVD Interrupt */
+			status = "okay";
 		};
 
 		exti: interrupt-controller@40010400 {
@@ -244,6 +251,12 @@
 			interrupts = <40>, <41>, <42>, <43>;
 			interrupt-names = "brk", "up", "trg_com", "cc";
 			status = "disabled";
+
+			pwm1: pwm {
+				compatible = "wch,gptm-pwm";
+				status = "disabled";
+				#pwm-cells = <3>;
+			};
 		};
 
 		tim2: counter@40000000 {
@@ -318,29 +331,58 @@
 			};
 		};
 
-		wwdg: watchdog@40002c00 {
-			compatible = "wch,wwdg";
-			reg = <0x40002c00 0x400>;
-			clocks = <&rcc RCC_APB1_WWDG>;
-			interrupt-parent = <&pfic>;
-			interrupts = <16>;
+
+		iwdg: watchdog@40003000 {
+			compatible = "wch,ch32-watchdog";
+			reg = <0x40003000 0x400>;
 			status = "disabled";
 		};
 
-		iwdg: watchdog@40003000 {
-			compatible = "wch,iwdg";
-			reg = <0x40003000 0x10>;
+		wwdg: watchdog@40002c00 {
+			compatible = "wch,ch32-wwdg";
+			reg = <0x40002c00 0x400>;
+			clocks = <&rcc 0x800>;
+			interrupt-parent = <&pfic>;
+			interrupts = <0>; /* Use 0 or appropriate vector if WWDG has IRQ */
+			status = "disabled";
+		};
+
+
+		bkp: bbram@40006c00 {
+			compatible = "wch,ch32-bbram";
+			reg = <0x40006c00 0x40>;
+			size = <20>; /* 10 registers * 2 bytes */
+			status = "disabled";
+		};
+
+
+		rtc: rtc@40002800 {
+			compatible = "wch,ch32-rtc";
+			reg = <0x40002800 0x400>;
+			interrupt-parent = <&pfic>;
+			interrupts = <3>; /* RTC_IRQn */
+			clocks = <&rcc 0x10000000>; /* RTC is special, relies on PWR/BKP usually */
+			status = "disabled";
+		};
+
+		lptim: timer@40007c00 {
+			compatible = "wch,ch32-lptim";
+			reg = <0x40007c00 0x400>;
+			clocks = <&rcc RCC_APB1_LPTIM>;
+			interrupt-parent = <&pfic>;
+			interrupts = <63>;
 			status = "disabled";
 		};
 
 
 		can1: can@40006400 {
-			compatible = "wch,can";
+			compatible = "wch,ch32-can";
 			reg = <0x40006400 0x400>;
 			clocks = <&rcc RCC_APB1_CAN1>;
 			interrupt-parent = <&pfic>;
 			interrupts = <35>, <36>, <38>;
 			interrupt-names = "tx", "rx", "sce";
+			bitrate = <125000>;
 			status = "disabled";
 		};
 
@@ -352,6 +394,7 @@
 			num-bidir-endpoints = <8>;
 			status = "disabled";
 		};
+
 
 		usbpd: usbpd@40027000 {
 			compatible = "wch,ch32-usbpd";

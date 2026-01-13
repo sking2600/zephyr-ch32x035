@@ -1,0 +1,35 @@
+# Copyright (c) 2025 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH CH32 CAN controller
+
+compatible: "wch,ch32-can"
+
+include: can-controller.yaml
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clocks:
+    required: true
+
+  sample-point:
+    type: int
+    description: Sample point in permille (default 875)
+
+  bitrate:
+    type: int
+    description: Bus speed in bits/s
+    required: true
+
+  bitrate-data:
+    type: int
+    description: Data phase bus speed in bits/s (for CAN FD)
+
+  sample-point-data:
+    type: int
+    description: Data phase sample point in permille

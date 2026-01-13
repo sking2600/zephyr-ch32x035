@@ -1,0 +1,9 @@
+# Copyright (c) 2024 WCH
+# SPDX-License-Identifier: Apache-2.0
+
+config RTC_WCH
+	bool "WCH RTC Driver"
+	default y
+	depends on DT_HAS_WCH_CH32_RTC_ENABLED
+	help
+	  Enable WCH RTC driver.

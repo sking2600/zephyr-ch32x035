@@ -81,6 +81,8 @@ struct counter_alarm_cfg alarm_cfg;
 #define TIMER DT_NODELABEL(rtc)
 #elif defined(CONFIG_COUNTER_MCUX_RTC)
 #define TIMER DT_NODELABEL(rtc)
+#elif defined(CONFIG_COUNTER_WCH_LPTIM)
+#define TIMER DT_ALIAS(counter0)
 #else
 #error Unable to find a counter device node in devicetree
 #endif

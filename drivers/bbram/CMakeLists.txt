@@ -19,6 +19,7 @@ zephyr_library_sources_ifdef(CONFIG_BBRAM_NPCX bbram_npcx.c)
 zephyr_library_sources_ifdef(CONFIG_BBRAM_NPCX_EMUL bbram_npcx_emul.c)
 zephyr_library_sources_ifdef(CONFIG_BBRAM_RTS5912 bbram_rts5912.c)
 zephyr_library_sources_ifdef(CONFIG_BBRAM_STM32 bbram_stm32.c)
+zephyr_library_sources_ifdef(CONFIG_BBRAM_WCH bbram_wch.c)
 zephyr_library_sources_ifdef(CONFIG_BBRAM_XEC bbram_xec.c)
 zephyr_library_sources_ifdef(CONFIG_USERSPACE bbram_handlers.c)
 # zephyr-keep-sorted-stop
