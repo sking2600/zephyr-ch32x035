@@ -291,7 +291,7 @@ static int wch_usbhs_init(const struct device *dev)
 	k_busy_wait(10);
 	usb->CONTROL = 0x00;
 	
-	usb->ENDP_CONFIG = 0x00010001; /* EP0 RX and TX EN */
+	usb->ENDP_CONFIG = WCH_USBHS_UEP0_TX_EN | WCH_USBHS_UEP0_RX_EN; /* EP0 RX and TX EN */
 	usb->UEP0_MAX_LEN = 64;
 	
 	struct wch_usbhs_data *priv = udc_get_private(dev);

@@ -11,6 +11,10 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/logging/log.h>
+#define CAN_WCH_BTR_BRP_MASK   0x3FF
+#define CAN_WCH_BTR_TS1_MASK   0x1F
+#define CAN_WCH_BTR_TS2_MASK   0x7
+#define CAN_WCH_BTR_SJW_MASK   0xF
 #include <zephyr/irq.h>
 #include <zephyr/pm/device.h>
 #include <hal_ch32fun.h>
@@ -159,12 +163,12 @@ static int can_wch_set_timing_data(const struct device *dev,
 
 	/* CANFD_BTR layout:
 	 * BRP:   [25:16] (10 bits)
-	 * TSEG1: [12:8]  (5 bits) - Approx, checking width
+	 * TSEG1: [12:8]  (5 bits)
 	 * TSEG2: [6:4]   (3 bits)
 	 * SJW:   [3:0]   (4 bits)
-	 * (Assumed based on shift values below. Standard might differ, but correcting clear mask to match logic.)
 	 */
-	can->CANFD_BTR &= ~(0x3FF << 16 | 0x1F << 8 | 0x7 << 4 | 0xF); 
+	can->CANFD_BTR &= ~(CAN_WCH_BTR_BRP_MASK << 16 | CAN_WCH_BTR_TS1_MASK << 8 | 
+			    CAN_WCH_BTR_TS2_MASK << 4 | CAN_WCH_BTR_SJW_MASK); 
 	can->CANFD_BTR |= (timing_data->prescaler - 1) << 16;
 	can->CANFD_BTR |= (timing_data->phase_seg1 - 1) << 8;
 	can->CANFD_BTR |= (timing_data->phase_seg2 - 1) << 4;

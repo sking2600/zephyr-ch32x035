@@ -12,6 +12,11 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/pm/device.h>
+#include <zephyr/kernel.h>
+
+#define LOG_LEVEL CONFIG_ADC_LOG_LEVEL
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(adc_wch);
 
 #define WCH_ADC_PGA_1X 0
 #define WCH_ADC_PGA_4X ADC_PGA_0
@@ -115,24 +120,26 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 	}
 
 	if (sequence->calibrate) {
-		uint32_t timeout = 1000; /* 10ms at 10us steps */
+		uint32_t timeout = ADC_WCH_TIMEOUT_US / ADC_WCH_TIMEOUT_STEP_US;
 
 		regs->CTLR2 |= ADC_RSTCAL;
 		while ((regs->CTLR2 & ADC_RSTCAL) != 0 && timeout > 0) {
-			k_busy_wait(10);
+			k_busy_wait(ADC_WCH_TIMEOUT_STEP_US);
 			timeout--;
 		}
 		if (timeout == 0) {
+			LOG_ERR("Calibration reset timeout");
 			return -EIO;
 		}
 
-		timeout = 1000;
+		timeout = ADC_WCH_TIMEOUT_US / ADC_WCH_TIMEOUT_STEP_US;
 		regs->CTLR2 |= ADC_CAL;
 		while ((regs->CTLR2 & ADC_CAL) != 0 && timeout > 0) {
-			k_busy_wait(10);
+			k_busy_wait(ADC_WCH_TIMEOUT_STEP_US);
 			timeout--;
 		}
 		if (timeout == 0) {
+			LOG_ERR("Calibration timeout");
 			return -EIO;
 		}
 	}
@@ -233,13 +240,14 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 
 	regs->CTLR2 |= ADC_RSWSTART;
 	for (i = 0; i < total_channels; i++) {
-		uint32_t timeout = 100; /* 1ms at 10us steps */
+		uint32_t timeout = ADC_WCH_TIMEOUT_US / ADC_WCH_TIMEOUT_STEP_US;
 
 		while ((regs->STATR & ADC_EOC) == 0 && timeout > 0) {
-			k_busy_wait(10);
+			k_busy_wait(ADC_WCH_TIMEOUT_STEP_US);
 			timeout--;
 		}
 		if (timeout == 0) {
+			LOG_ERR("Conversion timeout");
 			return -EIO;
 		}
 		*samples++ = regs->RDATAR;
@@ -253,6 +261,8 @@ static int adc_wch_init(const struct device *dev)
 	struct adc_wch_config *config = (struct adc_wch_config *)dev->config;
 	ADC_TypeDef *regs = config->regs;
 	int err;
+
+	LOG_INF("WCH ADC driver init");
 
 	clock_control_on(config->clock_dev, (clock_control_subsys_t)(uintptr_t)config->clock_id);
 

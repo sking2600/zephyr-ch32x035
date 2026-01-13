@@ -3,11 +3,15 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#define DT_DRV_COMPAT wch_wch_dma
+#define DT_DRV_COMPAT wch_dma
 
 #include <zephyr/drivers/dma.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/pm/device.h>
+
+#define LOG_LEVEL CONFIG_DMA_LOG_LEVEL
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(dma_wch);
 
 #include <hal_ch32fun.h>
 
@@ -16,7 +20,9 @@
 
 #define DMA_WCH_AIF        (DMA_GIF1 | DMA_TCIF1 | DMA_HTIF1 | DMA_TEIF1)
 #define DMA_WCH_IF_OFF(ch) (4 * (ch))
-#define DMA_WCH_MAX_BLOCK  ((UINT32_C(2) << 16) - 1)
+/* DMA Channel Counter register is 16-bit */
+#define DMA_WCH_CNTR_MASK  0xFFFF
+#define DMA_WCH_MAX_BLOCK  DMA_WCH_CNTR_MASK
 
 struct dma_wch_chan_regs {
 	volatile uint32_t CFGR;
@@ -79,6 +85,8 @@ static int dma_wch_init(const struct device *dev)
 {
 	const struct dma_wch_config *config = dev->config;
 	clock_control_subsys_t clock_sys = (clock_control_subsys_t *)(uintptr_t)config->clock_id;
+
+	LOG_INF("WCH DMA driver init");
 
 	if (config->num_channels > DMA_WCH_MAX_CHAN) {
 		return -ENOTSUP;
@@ -444,6 +452,7 @@ static void dma_wch_handle_callback(const struct device *dev, uint32_t ch, uint8
 	if (ip & DMA_TCIF1) {
 		cb_func(dev, cb_data, ch, DMA_STATUS_COMPLETE);
 	} else if (ip & DMA_TEIF1) {
+		LOG_ERR("DMA transfer error on channel %d", ch);
 		cb_func(dev, cb_data, ch, -EIO);
 	} else if (ip & DMA_HTIF1) {
 		cb_func(dev, cb_data, ch, DMA_STATUS_BLOCK);

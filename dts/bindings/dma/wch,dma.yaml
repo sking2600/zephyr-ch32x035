@@ -15,7 +15,7 @@ description: |
 
   It is present on WCH CH32V and CH32X series SoCs.
 
-compatible: "wch,wch-dma"
+compatible: "wch,dma"
 
 include: dma-controller.yaml
 

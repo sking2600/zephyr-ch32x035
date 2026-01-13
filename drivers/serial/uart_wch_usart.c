@@ -14,6 +14,10 @@
 #include <zephyr/drivers/dma.h>
 #include <zephyr/pm/device.h>
 
+#define LOG_LEVEL CONFIG_UART_LOG_LEVEL
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(uart_wch);
+
 #include <hal_ch32fun.h>
 
 struct usart_wch_config {
@@ -546,6 +550,7 @@ static int usart_wch_init(const struct device *dev)
 
 	err = clock_control_get_rate(config->clock_dev, clock_sys, &clock_rate);
 	if (err != 0) {
+		LOG_ERR("Failed to get clock rate");
 		return err;
 	}
 	divn = (clock_rate + config->current_speed / 2) / config->current_speed;
@@ -560,6 +565,7 @@ static int usart_wch_init(const struct device *dev)
 		ctlr1 |= USART_CTLR1_PCE;
 		break;
 	default:
+		LOG_ERR("Invalid parity setting");
 		return -EINVAL;
 	}
 

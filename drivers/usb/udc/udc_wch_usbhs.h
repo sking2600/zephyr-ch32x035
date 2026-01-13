@@ -252,6 +252,9 @@ static inline void wch_usbhs_set_max_len(WCH_USBHS_RegDef *usb, uint8_t ep_idx, 
 
 #define USBHS_EP_NUM 16
 
+#define WCH_USBHS_UEP0_RX_EN         0x00000001
+#define WCH_USBHS_UEP0_TX_EN         0x00010000
+
 struct wch_usbhs_ep_state {
 	uint16_t mps;
 	uint8_t type;

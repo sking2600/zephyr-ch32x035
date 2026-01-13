@@ -9,6 +9,7 @@
 #define LOG_LEVEL CONFIG_I2C_LOG_LEVEL
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(i2c_wch);
+#include <zephyr/kernel.h>
 
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>
