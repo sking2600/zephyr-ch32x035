@@ -1,0 +1,15 @@
+/ {
+	aliases {
+		pwm-0 = &lptim_pwm;
+	};
+};
+
+&lptim {
+	status = "okay";
+	
+	lptim_pwm: pwm {
+		compatible = "wch,ch32-lptim-pwm";
+		status = "okay";
+		#pwm-cells = <3>;
+	};
+};
