@@ -11,6 +11,11 @@ properties:
   "#pwm-cells":
     const: 3
 
+  prescaler:
+    type: int
+    required: true
+    description: Clock prescaler value for the timer
+
 pwm-cells:
   - channel
   - period

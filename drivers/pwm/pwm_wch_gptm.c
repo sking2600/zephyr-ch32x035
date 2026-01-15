@@ -214,6 +214,14 @@ static int pwm_wch_gptm_init(const struct device *dev)
 	/* Disable and configure the counter */
 	regs->CTLR1 = TIM_ARPE;
 	regs->PSC = config->prescaler;
+
+#if defined(TIM1_BASE)
+	if ((uintptr_t)regs == TIM1_BASE) {
+		/* Enable Main Output for advanced timers */
+		regs->BDTR |= TIM_MOE;
+	}
+#endif
+
 	regs->CTLR1 |= TIM_CEN;
 
 	return 0;
@@ -224,7 +232,7 @@ static int pwm_wch_gptm_init(const struct device *dev)
                                                                                                    \
 	static const struct pwm_wch_gptm_config pwm_wch_gptm_##idx##_config = {                    \
 		.regs = (TIM_TypeDef *)DT_REG_ADDR(DT_INST_PARENT(idx)),                           \
-		.prescaler = DT_PROP(DT_INST_PARENT(idx), prescaler),                              \
+		.prescaler = DT_INST_PROP(idx, prescaler),                                         \
 		.clock_dev = DEVICE_DT_GET(DT_CLOCKS_CTLR(DT_INST_PARENT(idx))),                   \
 		.clock_id = DT_CLOCKS_CELL(DT_INST_PARENT(idx), id),                               \
 		.pin_cfg = PINCTRL_DT_INST_DEV_CONFIG_GET(idx),                                    \

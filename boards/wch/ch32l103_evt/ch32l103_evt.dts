@@ -130,6 +130,7 @@ zephyr_udc0: &usbfs {
 		#pwm-cells = <3>;
 		pinctrl-0 = <&tim1_default>;
 		pinctrl-names = "default";
+		prescaler = <71>;
 	};
 };
 &iwdg { status = "okay"; };
