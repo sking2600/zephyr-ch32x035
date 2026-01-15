@@ -13,6 +13,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/sys/util_macro.h>
+#include <zephyr/sys/printk.h>
 
 #include <hal_ch32fun.h>
 
@@ -125,9 +126,9 @@ static void clock_control_wch_rcc_setup_flash(void)
 		latency = FLASH_ACTLR_LATENCY_2;
 	}
 #elif defined(CONFIG_SOC_CH32L103)
-	if (WCH_RCC_SYSCLK <= 36000000) {
+	if (WCH_RCC_SYSCLK <= 24000000) {
 		latency = FLASH_ACTLR_LATENCY_0;
-	} else if (WCH_RCC_SYSCLK <= 72000000) {
+	} else if (WCH_RCC_SYSCLK <= 48000000) {
 		latency = FLASH_ACTLR_LATENCY_1;
 	} else {
 		latency = FLASH_ACTLR_LATENCY_2;
@@ -139,7 +140,7 @@ static void clock_control_wch_rcc_setup_flash(void)
 #endif
 }
 
-static DEVICE_API(clock_control, clock_control_wch_rcc_api) = {
+static const struct clock_control_driver_api clock_control_wch_rcc_api = {
 	.on = clock_control_wch_rcc_on,
 	.off = clock_control_wch_rcc_off,
 	.get_rate = clock_control_wch_rcc_get_rate,
@@ -151,11 +152,31 @@ static int clock_control_wch_rcc_init(const struct device *dev)
 
 	clock_control_wch_rcc_setup_flash();
 
-	if (IS_ENABLED(CONFIG_DT_HAS_WCH_CH32V00X_PLL_CLOCK_ENABLED) ||
-	    IS_ENABLED(CONFIG_DT_HAS_WCH_CH32V20X_30X_PLL_CLOCK_ENABLED)) {
-		/* Disable the PLL before potentially changing the input clocks. */
+#if defined(CONFIG_SOC_CH32L103)
+	/* CH32L103 96MHz Target: EXTEN Register (Bit 4) bypasses HSI Pre-divider */
+	/* We need 8MHz input to PLL (8*12=96). Without this, we get 4*12=48 */
+	{
+		/* 1. Enable PWR, BKP, and AFIO (Required for EXTEN Access) */
+		RCC->APB2PCENR |= RCC_AFIOEN;
+        /* Hardcode AFIOEN (Bit 0) safety */
+        RCC->APB2PCENR |= 0x1;
+        RCC->APB1PCENR |= RCC_PWREN | RCC_BKPEN;
+
+		/* 2. Unlock Backup Domain */
+		PWR->CTLR |= PWR_CTLR_DBP;
+
+		/* 3. Force PLL OFF (Required to write EXTEN) */
 		RCC->CTLR &= ~RCC_PLLON;
+        while (RCC->CTLR & RCC_PLLRDY) {
+            /* Wait for PLL to stop */
+        }
+
+		/* 4. Set EXTEN Bit 4 */
+		EXTEN->EXTEN_CTR |= (1<<4);
 	}
+#endif
+
+	clock_control_wch_rcc_setup_flash();
 
 	/* Always enable the LSI. */
 	RCC->RSTSCKR |= RCC_LSION;
@@ -198,6 +219,13 @@ static int clock_control_wch_rcc_init(const struct device *dev)
 				pllmul = i;
 			}
 		}
+
+#if defined(CONFIG_SOC_CH32L103)
+		/* CH32L103 96MHz: Force x12 Multiplier */
+		/* Index 10 in pllmul_lut is 12. Input 8MHz * 12 = 96MHz */
+		pllmul = 10;
+#endif
+
 		RCC->CFGR0 &= ~RCC_PLLMULL;
 		RCC->CFGR0 |= WCH_RCC_PLLMUL_VAL(pllmul);
 #endif
@@ -205,6 +233,18 @@ static int clock_control_wch_rcc_init(const struct device *dev)
 		while ((RCC->CTLR & RCC_PLLRDY) == 0) {
 		}
 	}
+
+	/* HCLK = SYSCLK = APB1 */
+	RCC->CFGR0 = (RCC->CFGR0 & ~RCC_HPRE) | RCC_HPRE_DIV1;
+
+#if defined(CONFIG_SOC_CH32L103)
+	/* CH32L103 96MHz: APB1 (PPRE1) Max 36MHz. 96/4 = 24MHz (Safe) */
+	if (WCH_RCC_SYSCLK > 72000000) {
+		RCC->CFGR0 = (RCC->CFGR0 & ~RCC_PPRE1) | RCC_PPRE1_DIV4;
+	} else if (WCH_RCC_SYSCLK > 36000000) {
+        RCC->CFGR0 = (RCC->CFGR0 & ~RCC_PPRE1) | RCC_PPRE1_DIV2;
+    }
+#endif
 
 	if (IS_ENABLED(WCH_RCC_SRC_IS_HSI)) {
 		RCC->CFGR0 = (RCC->CFGR0 & ~RCC_SW) | RCC_SW_HSI;
@@ -217,9 +257,24 @@ static int clock_control_wch_rcc_init(const struct device *dev)
 
 	/* Clear the interrupt flags. */
 	RCC->INTR = RCC_CSSC | RCC_PLLRDYC | RCC_HSERDYC | RCC_LSIRDYC;
-	/* HCLK = SYSCLK = APB1 */
-	RCC->CFGR0 = (RCC->CFGR0 & ~RCC_HPRE) | RCC_HPRE_DIV1;
 
+	/* Configure USBPRE for 48MHz (Bits 23:22) */
+	RCC->CFGR0 &= ~RCC_CFGR0_USBPRE;
+	if (WCH_RCC_SYSCLK == 96000000) {
+		/* PLL / 2 = 48MHz (Bit 23=0, Bit 22=1) */
+		RCC->CFGR0 |= (1 << 22);
+	} else if (WCH_RCC_SYSCLK == 72000000) {
+		/* PLL / 1.5 = 48MHz (Bit 23=1, Bit 22=0) -> pattern 0x2 */
+		RCC->CFGR0 |= (2 << 22);
+	} else if (WCH_RCC_SYSCLK == 48000000) {
+		/* PLL / 1 = 48MHz (Bit 23=0, Bit 22=0) - already cleared */
+	}
+
+	return 0;
+
+	printk("WCH Clock Init Done (SYSCLK=%u RCC_CFGR0=%08x USBPRE=%d)\n", 
+           WCH_RCC_SYSCLK, RCC->CFGR0, (RCC->CFGR0 >> 22) & 0x3);
+	printk("HSI TRIM=%02x CAL=%02x\n", (RCC->CTLR >> 3) & 0x1F, (RCC->CTLR >> 8) & 0xFF);
 	return 0;
 }
 
