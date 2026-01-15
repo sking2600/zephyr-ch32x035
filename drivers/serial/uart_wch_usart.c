@@ -30,6 +30,9 @@ struct usart_wch_config {
 #if defined(CONFIG_UART_INTERRUPT_DRIVEN) || defined(CONFIG_UART_ASYNC_API)
 	void (*irq_config_func)(const struct device *dev);
 #endif
+#if defined(CONFIG_UART_WCH_USART_DMA)
+	const struct device *dma_dev;
+	uint8_t tx_dma_channel;
 	uint8_t rx_dma_channel;
 #endif
 	bool hw_flow_control;

@@ -4,6 +4,6 @@
 config DMA_WCH
 	bool "CH32V DMA driver"
 	default y
-	depends on DT_HAS_WCH_WCH_DMA_ENABLED
+	depends on DT_HAS_WCH_DMA_ENABLED
 	help
 	  DMA driver for the WCH CH32V SoC family.

@@ -6,13 +6,18 @@
 
 #include <zephyr/dt-bindings/pinctrl/ch32v20x_30x-pinctrl.h>
 
-#define USB_DM_PA11 CH32V20X_V30X_PINMUX_DEFINE(PA, 11, SPI1, 0)
-#define USB_DP_PA12 CH32V20X_V30X_PINMUX_DEFINE(PA, 12, SPI1, 0)
+/* USBFS pins are dedicated. Using ADC mux as a neutral placeholder
+   that results in Analog Input configuration (CFGR = 0), which
+   is recommended for USB pins when not managed by GPIO. */
+#define USB_DM_PA11 CH32V20X_V30X_PINMUX_DEFINE(PA, 11, ADC1, 0)
+#define USB_DP_PA12 CH32V20X_V30X_PINMUX_DEFINE(PA, 12, ADC1, 0)
+
 
 &pinctrl {
 	usart1_default: usart1_default {
 		group1 {
 			pinmux = <USART1_TX_PA9_0>;
+			output-high;
 		};
 		group2 {
 			pinmux = <USART1_RX_PA10_0>;

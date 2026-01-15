@@ -6,8 +6,15 @@
 
 / {
 	chosen {
-		zephyr,console = &cdc_acm_uart0;
+		zephyr,console = &usart1;
+		zephyr,shell-uart = &usart1;
 	};
+};
+
+&usart1 {
+	status = "okay";
+	pinctrl-0 = <&usart1_default>;
+	pinctrl-names = "default";
 };
 
 &zephyr_udc0 {

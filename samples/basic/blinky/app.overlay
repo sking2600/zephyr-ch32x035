@@ -1,0 +1,18 @@
+/ {
+	aliases {
+		led0 = &led_pc13;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		led_pc13: led_pc13 {
+			gpios = <&gpioc 13 GPIO_ACTIVE_LOW>;
+			label = "User LED";
+		};
+	};
+};
+
+&gpioa { status = "okay"; };
+&gpiob { status = "okay"; };
+&gpioc { status = "okay"; };
+&gpiod { status = "okay"; };

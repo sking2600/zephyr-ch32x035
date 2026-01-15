@@ -24,8 +24,8 @@
 	leds {
 		compatible = "gpio-leds";
 		blue_led: led_0 {
-			gpios = <&gpioc 13 GPIO_ACTIVE_LOW>;
-			label = "Blue LED";
+			gpios = <&gpioa 8 GPIO_ACTIVE_HIGH>;
+			label = "PA8 LED";
 		};
 	};
 
@@ -49,7 +49,7 @@
 &pll {
 	status = "okay";
 	clocks = <&clk_hsi>;
-	mul = <9>;
+	mul = <18>;
 };
 
 &usart1 {
@@ -96,11 +96,15 @@ zephyr_udc0: &usbfs {
     dma-names = "tx", "rx";
 };
 
+&cpu0 {
+	clock-frequency = <72000000>;
+};
+
 &i2c1 {
     status = "okay";
     pinctrl-0 = <&i2c1_default>;
     pinctrl-names = "default";
-    clock-frequency = <96000000>;
+    clock-frequency = <48000000>;
     dmas = <&dma1 5>, <&dma1 6>;
     dma-names = "tx", "rx";
 };

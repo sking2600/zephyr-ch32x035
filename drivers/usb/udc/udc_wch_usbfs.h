@@ -99,6 +99,18 @@ static inline uint16_t wch_usbfs_get_ctrl(WCH_USBFS_RegDef *usb, uint8_t ep)
 	case 6: return (usb->UEP6_RX_CTRL << 8) | usb->UEP6_TX_CTRL;
 	case 7: return (usb->UEP7_RX_CTRL << 8) | usb->UEP7_TX_CTRL;
 	}
+#elif defined(CONFIG_SOC_CH32L103)
+	/* CH32L103: Compose from separate TX_CTRL and RX_CTRL registers */
+	switch (ep) {
+	case 0: return (usb->UEP0_RX_CTRL << 8) | usb->UEP0_TX_CTRL;
+	case 1: return (usb->UEP1_RX_CTRL << 8) | usb->UEP1_TX_CTRL;
+	case 2: return (usb->UEP2_RX_CTRL << 8) | usb->UEP2_TX_CTRL;
+	case 3: return (usb->UEP3_RX_CTRL << 8) | usb->UEP3_TX_CTRL;
+	case 4: return (usb->UEP4_RX_CTRL << 8) | usb->UEP4_TX_CTRL;
+	case 5: return (usb->UEP5_RX_CTRL << 8) | usb->UEP5_TX_CTRL;
+	case 6: return (usb->UEP6_RX_CTRL << 8) | usb->UEP6_TX_CTRL;
+	case 7: return (usb->UEP7_RX_CTRL << 8) | usb->UEP7_TX_CTRL;
+	}
 #else
 	switch (ep) {
 	case 0: return usb->UEP0_CTRL;
@@ -138,6 +150,18 @@ static inline void wch_usbfs_set_ctrl(WCH_USBFS_RegDef *usb, uint8_t ep, uint16_
 	case 6: usb->UEP6_TX_CTRL = val & 0xFF; usb->UEP6_RX_CTRL = (val >> 8) & 0xFF; break;
 	case 7: usb->UEP7_TX_CTRL = val & 0xFF; usb->UEP7_RX_CTRL = (val >> 8) & 0xFF; break;
 	}
+#elif defined(CONFIG_SOC_CH32L103)
+	/* CH32L103: TX_CTRL is low byte, RX_CTRL is high byte in combined register */
+	switch (ep) {
+	case 0: usb->UEP0_TX_CTRL = val & 0xFF; usb->UEP0_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 1: usb->UEP1_TX_CTRL = val & 0xFF; usb->UEP1_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 2: usb->UEP2_TX_CTRL = val & 0xFF; usb->UEP2_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 3: usb->UEP3_TX_CTRL = val & 0xFF; usb->UEP3_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 4: usb->UEP4_TX_CTRL = val & 0xFF; usb->UEP4_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 5: usb->UEP5_TX_CTRL = val & 0xFF; usb->UEP5_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 6: usb->UEP6_TX_CTRL = val & 0xFF; usb->UEP6_RX_CTRL = (val >> 8) & 0xFF; break;
+	case 7: usb->UEP7_TX_CTRL = val & 0xFF; usb->UEP7_RX_CTRL = (val >> 8) & 0xFF; break;
+	}
 #else
 	switch (ep) {
 	case 0: usb->UEP0_CTRL = val; break;
@@ -153,6 +177,11 @@ static inline void wch_usbfs_set_ctrl(WCH_USBFS_RegDef *usb, uint8_t ep, uint16_
 }
 
 /* WCH USBFS Bit Definitions (Internal to driver to avoid HAL conflicts) */
+#define WCH_USBFS_UC_SYS_CTRL_MASK   0x30
+#define WCH_USBFS_UC_SYS_CTRL0       0x00
+#define WCH_USBFS_UC_SYS_CTRL1       0x10
+#define WCH_USBFS_UC_SYS_CTRL2       0x20
+#define WCH_USBFS_UC_SYS_CTRL3       0x30
 #define WCH_USBFS_UC_DEV_PU_EN       0x20
 #define WCH_USBFS_UC_INT_BUSY        0x08
 #define WCH_USBFS_UC_RESET_SIE       0x04
@@ -181,6 +210,7 @@ static inline void wch_usbfs_set_ctrl(WCH_USBFS_RegDef *usb, uint8_t ep, uint16_
 #define WCH_USBFS_UEP_RX_EN          0x80
 
 /* Response Types (Note: X035 and L103 bits are same for RES_ACK/NAK/STALL) */
+/* Revert to 0x00 as per RM. L103 USBFS is likely WCH IP, not STM32 IP. */
 #define WCH_USBFS_UEP_T_RES_MASK     0x03
 #define WCH_USBFS_UEP_T_RES_ACK      0x00
 #define WCH_USBFS_UEP_T_RES_NAK      0x02
@@ -188,6 +218,7 @@ static inline void wch_usbfs_set_ctrl(WCH_USBFS_RegDef *usb, uint8_t ep, uint16_
 #define WCH_USBFS_UEP_T_TOG          0x04
 
 #define WCH_USBFS_UEP_R_RES_MASK     0x03
+/* Cleaned up to match WCH EXAM */
 #define WCH_USBFS_UEP_R_RES_ACK      0x00
 #define WCH_USBFS_UEP_R_RES_NAK      0x02
 #define WCH_USBFS_UEP_R_RES_STALL    0x03
@@ -284,7 +315,8 @@ struct wch_usbfs_data {
 	struct k_msgq msgq;
 	char msgq_buf[8 * sizeof(struct usbfs_wch_msg)];
 	K_KERNEL_STACK_MEMBER(thread_stack, 1024);
-	uint8_t setup_buf[8] __aligned(4);
+	uint8_t ep0_dma_buf[256] __aligned(4);
+	uint8_t pending_address;
 };
 
 struct wch_usbfs_config {

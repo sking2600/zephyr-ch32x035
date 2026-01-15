@@ -188,7 +188,7 @@
 		};
 
 		dma1: dma@40020000 {
-			compatible = "wch,wch-dma";
+			compatible = "wch,dma";
 			reg = <0x40020000 0x90>;
 			clocks = <&rcc RCC_AHB_DMA1>;
 			#dma-cells = <1>;
@@ -389,6 +389,7 @@
 		usbfs: usbfs@50000000 {
 			compatible = "wch,usbfs";
 			reg = <0x50000000 0x1000>;
+			clocks = <&rcc RCC_AHB_USBFS>;
 			interrupt-parent = <&pfic>;
 			interrupts = <59>;
 			num-bidir-endpoints = <8>;

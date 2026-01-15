@@ -10,6 +10,8 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/dt-bindings/clock/ch32l103_clock.h>
+#include <zephyr/usb/usb_ch9.h>
+#include <soc.h>
 
 LOG_MODULE_REGISTER(udc_wch_usbfs, CONFIG_UDC_DRIVER_LOG_LEVEL);
 
@@ -40,9 +42,10 @@ static int wch_usbfs_ep_enqueue(const struct device *dev,
 	
 	LOG_DBG("enqueue ep 0x%02x len %u", cfg->addr, buf->len);
 
-	if (ep_idx == 0) {
-		/* Handle EP0 specially? Usually handled by UDC core or setup ISR */
-		/* But for Data stage, we need to setup DMA */
+	if (ep_idx == 0 && USB_EP_DIR_IS_IN(cfg->addr)) {
+		/* Debug: EP0 IN data stage */
+		printk("EP0 IN enqueue: len=%u data[0]=0x%02x\n", buf->len, 
+		       buf->len > 0 ? buf->data[0] : 0);
 	}
 
 	udc_buf_put(cfg, buf);
@@ -57,21 +60,14 @@ static int wch_usbfs_ep_enqueue(const struct device *dev,
 
 	if (USB_EP_DIR_IS_IN(cfg->addr)) {
 		wch_usbfs_set_tx_len(usb, ep_idx, buf->len);
-		/* Set RESP to ACK to verify transmission */
-		/* Hardware toggles bit automatically if configured? */
-		/* Valid behavior: TOG is managed, just set ACK */
-		uint8_t ctrl = wch_usbfs_get_ctrl(usb, ep_idx);
+		uint16_t ctrl = wch_usbfs_get_ctrl(usb, ep_idx);
 		ctrl &= ~WCH_USBFS_UEP_T_RES_MASK;
 		ctrl |= WCH_USBFS_UEP_T_RES_ACK;
-		/* Assuming TOG is already correct or auto-managed by HW on ACK */
 		wch_usbfs_set_ctrl(usb, ep_idx, ctrl);
 	} else {
-		/* For OUT, we just set DMA and wait, but ensure RESP is ACK */
-		/* Normally we preset ACK in previous step? Or here? */
-		/* If we were NAKing, now we ACK */
-		uint8_t ctrl = wch_usbfs_get_ctrl(usb, ep_idx);
-		ctrl &= ~WCH_USBFS_UEP_R_RES_MASK;
-		ctrl |= WCH_USBFS_UEP_R_RES_ACK;
+		uint16_t ctrl = wch_usbfs_get_ctrl(usb, ep_idx);
+		ctrl &= ~(WCH_USBFS_UEP_R_RES_MASK << 8);
+		ctrl |= (WCH_USBFS_UEP_R_RES_ACK << 8);
 		wch_usbfs_set_ctrl(usb, ep_idx, ctrl);
 	}
 
@@ -89,13 +85,13 @@ static int wch_usbfs_ep_dequeue(const struct device *dev,
 	LOG_DBG("dequeue ep 0x%02x", cfg->addr);
 	
 	/* Stop transfer: Set NAK */
-	uint8_t ctrl = wch_usbfs_get_ctrl(usb, ep_idx);
+	uint16_t ctrl = wch_usbfs_get_ctrl(usb, ep_idx);
 	if (USB_EP_DIR_IS_IN(cfg->addr)) {
 		ctrl &= ~WCH_USBFS_UEP_T_RES_MASK;
 		ctrl |= WCH_USBFS_UEP_T_RES_NAK;
 	} else {
-		ctrl &= ~WCH_USBFS_UEP_R_RES_MASK;
-		ctrl |= WCH_USBFS_UEP_R_RES_NAK;
+		ctrl &= ~(WCH_USBFS_UEP_R_RES_MASK << 8);
+		ctrl |= (WCH_USBFS_UEP_R_RES_NAK << 8);
 	}
 	wch_usbfs_set_ctrl(usb, ep_idx, ctrl);
 
@@ -219,18 +215,23 @@ static int wch_usbfs_enable(const struct device *dev)
 	const struct wch_usbfs_config *cfg = dev->config;
 	WCH_USBFS_RegDef *usb = (WCH_USBFS_RegDef *)cfg->base;
 
-	LOG_DBG("enable");
-
+	printk("USB: Enable start\n");
 	/* Enable USBFS interrupts */
 	usb->INT_EN = WCH_USBFS_UIE_SUSPEND | WCH_USBFS_UIE_BUS_RST | WCH_USBFS_UIE_TRANSFER;
 
 	/* Enable Device, DMA, and Interrupts at the controller level */
-	usb->BASE_CTRL = WCH_USBFS_UC_DEV_PU_EN | WCH_USBFS_UC_INT_BUSY | WCH_USBFS_UC_DMA_EN;
+	/* Match EXAM: PU_EN | INT_BUSY | DMA_EN (0x29). No SYS_CTRL3. */
+	usb->BASE_CTRL = WCH_USBFS_UC_DEV_PU_EN | WCH_USBFS_UC_INT_BUSY | 
+			 WCH_USBFS_UC_DMA_EN;
+
+// ... (Moving to Init/Reset sections in separate chunks if needed, or combining if close)
+// Wait, I can't combine non-contiguous. I'll do Enable first.
 
 	/* Enable Pull-up to signal connection */
 	usb->UDEV_CTRL = WCH_USBFS_UD_PD_DIS | WCH_USBFS_UD_PORT_EN;
 
 	cfg->irq_enable_func(dev);
+	printk("USB: Enable done\n");
 
 	return 0;
 }
@@ -260,23 +261,30 @@ static int wch_usbfs_init(const struct device *dev)
 	int ret;
 
 	LOG_DBG("init");
+    printk("WCH USBFS API Init\n");
 
 	if (cfg->clock_enable_func) {
 		ret = cfg->clock_enable_func(dev);
 		if (ret < 0) {
+            printk("USB: Clock enable failed: %d\n", ret);
 			return ret;
 		}
 	}
 
 	ret = pinctrl_apply_state(cfg->pcfg, PINCTRL_STATE_DEFAULT);
 	if (ret < 0) {
+        printk("USB: Pinctrl apply failed: %d\n", ret);
 		return ret;
 	}
+    printk("USB: Init sequence start\n");
 
 	/* Reset the USBFS peripheral */
 	usb->BASE_CTRL = WCH_USBFS_UC_RESET_SIE | WCH_USBFS_UC_CLR_ALL;
 	k_busy_wait(10);
-	usb->BASE_CTRL = 0x00;
+	usb->BASE_CTRL = 0x00; /* This clears DEV_PU_EN (Disconnect) */
+	
+	/* Force Disconnect Delay to ensure Host sees removal */
+	k_msleep(500);
 	
 	/* Basic configuration */
 #if defined(CONFIG_SOC_CH32X035)
@@ -301,10 +309,14 @@ static int wch_usbfs_init(const struct device *dev)
 
 	/* EP0 setup buffer is special, fixed location */
 	struct wch_usbfs_data *priv = udc_get_private(dev);
-	wch_usbfs_set_dma(usb, 0, (uint32_t)priv->setup_buf);
+	wch_usbfs_set_dma(usb, 0, (uint32_t)priv->ep0_dma_buf);
 	
 	/* Initialize Control EP0 */
 	usb->UEP0_TX_LEN = 0;
+	/* Set EP0 to accept SETUP packets (RX=ACK, TX=NAK) */
+	/* Set EP0 to accept SETUP packets (RX=ACK, TX=NAK). */
+	usb->UEP0_TX_CTRL = WCH_USBFS_UEP_T_RES_NAK;
+	usb->UEP0_RX_CTRL = WCH_USBFS_UEP_R_RES_ACK;
 
 	/* Start worker thread */
 	k_thread_create(&priv->thread_data, priv->thread_stack,
@@ -312,6 +324,8 @@ static int wch_usbfs_init(const struct device *dev)
 			wch_usbfs_thread_handler,
 			(void *)dev, NULL, NULL,
 			K_PRIO_COOP(2), 0, K_NO_WAIT);
+
+	printk("USB: Init sequence done\n");
 
 	return 0;
 }
@@ -357,8 +371,25 @@ static int wch_usbfs_driver_init(const struct device *dev)
 	const struct wch_usbfs_config *cfg = dev->config;
 	int i;
 
+#if defined(CONFIG_SOC_CH32L103)
+	/* DEBUG: 3 SLOW blinks on PC13 at USB driver init entry */
+	{
+		volatile uint32_t d;
+		int b;
+		for (b = 0; b < 3; b++) {
+			GPIOC->BCR = (1 << 13);  /* LED ON */
+			for (d = 0; d < 1000000; d++) { __asm__ volatile("nop"); }
+			GPIOC->BSHR = (1 << 13); /* LED OFF */
+			for (d = 0; d < 1000000; d++) { __asm__ volatile("nop"); }
+		}
+	}
+#endif
+
+    printk("WCH USBFS Driver Init (POST_KERNEL)\n");
+
 	k_mutex_init(&data->mutex);
 	k_msgq_init(&priv->msgq, priv->msgq_buf, sizeof(struct usbfs_wch_msg), 8);
+	priv->pending_address = 0;
 
 	data->caps.rwup = 1;
 	data->caps.mps0 = UDC_MPS0_64;
@@ -392,6 +423,8 @@ static int wch_usbfs_driver_init(const struct device *dev)
 		udc_register_ep(dev, &cfg->ep_cfg_in[i]);
 	}
 
+    printk("WCH USBFS Driver Init Done\n");
+
 	return 0;
 }
 
@@ -410,24 +443,78 @@ static void wch_usbfs_isr_transfer(const struct device *dev)
 
 	switch (token) {
 	case WCH_USBFS_UIS_TOKEN_SETUP:
-		msg.type = USBFS_WCH_SETUP;
+		if (ep_idx == 0) {
+			struct usb_setup_packet *setup = (struct usb_setup_packet *)priv->ep0_dma_buf;
+			/* Log only critical SETUP packets to avoid slowing down ISR */
+			if (setup->bRequest != USB_SREQ_SET_ADDRESS && setup->bRequest != USB_SREQ_GET_DESCRIPTOR) {
+				printk("ISR: SETUP req=0x%02x val=0x%04x\n", setup->bRequest, setup->wValue);
+			}
+
+			/* Handle SET_ADDRESS synchronously in ISR for timing */
+			if (setup->bRequest == USB_SREQ_SET_ADDRESS && 
+			    setup->bmRequestType == USB_REQTYPE_DIR_TO_DEVICE) {
+				priv->pending_address = setup->wValue & 0x7F;
+				
+				/* Immediately prepare 0-length IN response for Status Stage */
+				/* Status stage is ALWAYS DATA1 */
+				usb->UEP0_TX_LEN = 0;
+				wch_usbfs_set_ctrl(usb, 0, WCH_USBFS_UEP_T_TOG | WCH_USBFS_UEP_T_RES_ACK);
+				return;
+			}
+			
+			/* Handle initial GET_DESCRIPTOR (Device) synchronously to avoid host timeout */
+			if (setup->bRequest == USB_SREQ_GET_DESCRIPTOR && setup->wValue == 0x0100) {
+				printk("ISR: Sync GET_DESC(Device)\n");
+				/* For now, just ensuring the toggles are reset to DATA1 and we ACK.
+				 * The thread will soon call ep_enqueue to provide data. */
+				wch_usbfs_set_ctrl(usb, 0, WCH_USBFS_UEP_T_TOG | WCH_USBFS_UEP_T_RES_NAK |
+							 ((WCH_USBFS_UEP_R_TOG | WCH_USBFS_UEP_R_RES_ACK) << 8));
+			} else {
+				/* For other requests, next stage is always DATA1 */
+				/* Reset both to DATA1, but keep NAK until thread prepares data */
+				wch_usbfs_set_ctrl(usb, 0, WCH_USBFS_UEP_T_TOG | WCH_USBFS_UEP_T_RES_NAK |
+							 ((WCH_USBFS_UEP_R_TOG | WCH_USBFS_UEP_R_RES_NAK) << 8));
+			}
+			
+			/* Still notify the thread for proper UDC processing state machine */
+			msg.type = USBFS_WCH_SETUP;
+			k_msgq_put(&priv->msgq, &msg, K_NO_WAIT);
+		}
 		break;
 	case WCH_USBFS_UIS_TOKEN_IN:
+		/* Toggle TX bit for next transfer */
+		{
+			uint16_t ctrl = wch_usbfs_get_ctrl(usb, ep_idx);
+			ctrl ^= WCH_USBFS_UEP_T_TOG;
+			/* Set to NAK until next ep_enqueue */
+			ctrl = (ctrl & ~WCH_USBFS_UEP_T_RES_MASK) | WCH_USBFS_UEP_T_RES_NAK;
+			wch_usbfs_set_ctrl(usb, ep_idx, ctrl);
+		}
+
 		msg.type = USBFS_WCH_IN;
+		k_msgq_put(&priv->msgq, &msg, K_NO_WAIT);
 		break;
 	case WCH_USBFS_UIS_TOKEN_OUT:
+		/* Toggle RX bit for next transfer */
+		{
+			uint16_t ctrl = wch_usbfs_get_ctrl(usb, ep_idx);
+			ctrl ^= (WCH_USBFS_UEP_R_TOG << 8);
+			/* Set to NAK until next OUT buffer is ready */
+			ctrl = (ctrl & ~(WCH_USBFS_UEP_R_RES_MASK << 8)) | (WCH_USBFS_UEP_R_RES_NAK << 8);
+			wch_usbfs_set_ctrl(usb, ep_idx, ctrl);
+		}
+
 		msg.type = USBFS_WCH_OUT;
 		msg.rx_count = usb->RX_LEN;
+		k_msgq_put(&priv->msgq, &msg, K_NO_WAIT);
 		break;
 	case WCH_USBFS_UIS_TOKEN_SOF:
-		msg.type = USBFS_WCH_SOF;
+		/* SOF can be ignored for now */
 		break;
 	default:
-		usb->INT_FG = WCH_USBFS_UIF_TRANSFER;
-		return;
+		break;
 	}
 
-	k_msgq_put(&priv->msgq, &msg, K_NO_WAIT);
 	usb->INT_FG = WCH_USBFS_UIF_TRANSFER;
 }
 
@@ -449,7 +536,7 @@ static void handle_setup(const struct device *dev)
 	buf = udc_ctrl_alloc(dev, USB_CONTROL_EP_OUT, 8);
 	if (buf) {
 		udc_ep_buf_set_setup(buf);
-		net_buf_add_mem(buf, priv->setup_buf, 8);
+		net_buf_add_mem(buf, priv->ep0_dma_buf, 8);
 		udc_ctrl_update_stage(dev, buf);
 
 		if (udc_ctrl_stage_is_data_in(dev)) {
@@ -464,6 +551,7 @@ static void handle_setup(const struct device *dev)
 
 static void handle_transfer_in(const struct device *dev, uint8_t ep_idx)
 {
+	struct wch_usbfs_data *priv = udc_get_private(dev);
 	struct udc_ep_config *ep_cfg;
 	struct net_buf *buf;
 
@@ -481,6 +569,11 @@ static void handle_transfer_in(const struct device *dev, uint8_t ep_idx)
 			
 			if (udc_ctrl_stage_is_status_out(dev)) {
 				net_buf_unref(buf);
+			}
+
+			if (priv->pending_address != 0) {
+				wch_usbfs_set_address(dev, priv->pending_address);
+				priv->pending_address = 0;
 			}
 		} else {
 			udc_buf_get(ep_cfg);
@@ -556,12 +649,28 @@ static void wch_usbfs_isr(const struct device *dev)
 	}
 	
 	if (intflag & WCH_USBFS_UIF_BUS_RST) {
-		LOG_DBG("BUS_RST");
+		/* LOG_DBG("BUS_RST"); */
+		printk("ISR: BUS_RST\n");
 		usb->INT_FG = WCH_USBFS_UIF_BUS_RST;
 		
-		/* Reset device address */
+		/* Bus Reset: Reset Address and Re-init EP0 fully (Like EXAM) */
 		usb->DEV_ADDR = 0;
+		struct wch_usbfs_data *priv = udc_get_private(dev);
+		priv->pending_address = 0;
 		
+		/* Re-init EP0 DMA */
+		usb->UEP0_DMA = (uint32_t)priv->ep0_dma_buf;
+		
+		/* Re-init EP0 Control */
+		usb->UEP0_TX_LEN = 0;
+		usb->UEP0_TX_CTRL = WCH_USBFS_UEP_T_RES_NAK;
+		usb->UEP0_RX_CTRL = WCH_USBFS_UEP_R_RES_ACK;
+		
+		/* DIAG: Dump registers to verify state */
+		printk("RST: DMA=%08x CTRL=%02x T=%02x R=%02x\n", 
+		       usb->UEP0_DMA, usb->BASE_CTRL, 
+		       usb->UEP0_TX_CTRL, usb->UEP0_RX_CTRL);
+
 		/* Notify UDC */
 		udc_submit_event(dev, UDC_EVT_RESET, 0);
 	}

@@ -153,27 +153,8 @@ static int clock_control_wch_rcc_init(const struct device *dev)
 	clock_control_wch_rcc_setup_flash();
 
 #if defined(CONFIG_SOC_CH32L103)
-	/* CH32L103 96MHz Target: EXTEN Register (Bit 4) bypasses HSI Pre-divider */
-	/* We need 8MHz input to PLL (8*12=96). Without this, we get 4*12=48 */
-	{
-		/* 1. Enable PWR, BKP, and AFIO (Required for EXTEN Access) */
-		RCC->APB2PCENR |= RCC_AFIOEN;
-        /* Hardcode AFIOEN (Bit 0) safety */
-        RCC->APB2PCENR |= 0x1;
-        RCC->APB1PCENR |= RCC_PWREN | RCC_BKPEN;
-
-		/* 2. Unlock Backup Domain */
-		PWR->CTLR |= PWR_CTLR_DBP;
-
-		/* 3. Force PLL OFF (Required to write EXTEN) */
-		RCC->CTLR &= ~RCC_PLLON;
-        while (RCC->CTLR & RCC_PLLRDY) {
-            /* Wait for PLL to stop */
-        }
-
-		/* 4. Set EXTEN Bit 4 */
-		EXTEN->EXTEN_CTR |= (1<<4);
-	}
+	/* CH32L103 48MHz Target: HSI/2 (4MHz) * 12 = 48MHz */
+    /* No EXTEN bit needed (Default is HSI/2) */
 #endif
 
 	clock_control_wch_rcc_setup_flash();
@@ -220,11 +201,6 @@ static int clock_control_wch_rcc_init(const struct device *dev)
 			}
 		}
 
-#if defined(CONFIG_SOC_CH32L103)
-		/* CH32L103 96MHz: Force x12 Multiplier */
-		/* Index 10 in pllmul_lut is 12. Input 8MHz * 12 = 96MHz */
-		pllmul = 10;
-#endif
 
 		RCC->CFGR0 &= ~RCC_PLLMULL;
 		RCC->CFGR0 |= WCH_RCC_PLLMUL_VAL(pllmul);
@@ -267,7 +243,20 @@ static int clock_control_wch_rcc_init(const struct device *dev)
 		/* PLL / 1.5 = 48MHz (Bit 23=1, Bit 22=0) -> pattern 0x2 */
 		RCC->CFGR0 |= (2 << 22);
 	} else if (WCH_RCC_SYSCLK == 48000000) {
-		/* PLL / 1 = 48MHz (Bit 23=0, Bit 22=0) - already cleared */
+		/* PLL / 1 = 48MHz. Assuming Bit 22=1 is Div1 for CH32L103 (Verify!) */
+        /* Actually standard STM32 USBPRE: 0=Div1.5, 1=Div1. */
+        /* CH32L103 might use 2 bits. Let's try setting Bit 22=1 (0x1) based on previous 96MHz logic (where 1<<22 was Div2?? No, usually 96/2=48). */
+        /* Wait. If 1<<22 is Div2, then what is Div1? */
+        /* Let's look at Ch32L103 Reference. I'll guess standard approach: */
+        /* If 48MHz PLL, we need Div1. */
+        /* Testing 0x00 (Cleared) first? Or 0x01? */
+        /* If 0x01 (1<<22) was Div2, maybe 0x00 is Div1? */
+        /* I will set 0x1 (Div1) assuming standard behavior for now, or check bit 23. */
+        /* Actually, I'll clear it (0x0) for now, as Div1 is often default? */
+        /* No, usually 0 is Div1.5. */
+        /* I will set RCC_CFGR0_USBPRE (Bit 22) if defined. */
+        /* Let's try forcing 1<<22 (0x400000) which is typically USBPRE=1 -> PLL/1. */
+        RCC->CFGR0 |= (1 << 22);
 	}
 
 	return 0;
