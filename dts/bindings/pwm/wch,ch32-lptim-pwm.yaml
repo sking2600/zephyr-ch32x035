@@ -1,0 +1,23 @@
+# Copyright (c) 2024 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+description: WCH CH32 LPTIM PWM
+
+compatible: "wch,ch32-lptim-pwm"
+
+include: [pwm-controller.yaml, pinctrl-device.yaml, base.yaml]
+
+properties:
+  "#pwm-cells":
+    const: 3
+
+  pinctrl-0:
+    required: true
+
+  pinctrl-names:
+    required: true
+
+pwm-cells:
+  - channel
+  - period
+  - flags

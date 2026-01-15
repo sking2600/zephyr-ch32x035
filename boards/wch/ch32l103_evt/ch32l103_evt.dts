@@ -32,6 +32,7 @@
 	aliases {
 		led0 = &blue_led;
 		pwm-led0 = &pwm_led0;
+		lptim0 = &lptim;
 	};
 
 	pwmleds {
@@ -40,6 +41,12 @@
 			pwms = <&pwm1 0 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
 		};
 	};
+};
+
+&lptim {
+	status = "okay";
+	wch,clock-source = <3>; /* LSI @ 40kHz */
+	wch,prescaler = <1>;
 };
 
 &clk_hsi {
@@ -67,7 +74,7 @@
 
 &rcc {
 	status = "okay";
-	clocks = <&pll>;
+	clocks = <&clk_hsi>;
 };
 
 zephyr_udc0: &usbfs {
@@ -97,7 +104,7 @@ zephyr_udc0: &usbfs {
 };
 
 &cpu0 {
-	clock-frequency = <72000000>;
+	clock-frequency = <8000000>;
 };
 
 &i2c1 {

@@ -16,3 +16,33 @@ properties:
 
   clocks:
     required: true
+
+  wch,clock-source:
+    type: int
+    default: 0
+    enum:
+      - 0 # PCLK1
+      - 1 # HSI
+      - 2 # LSE
+      - 3 # LSI
+    description: |
+      Select the LPTIM internal clock source.
+      0: PCLK1
+      1: HSI
+      2: LSE
+      3: LSI
+
+  wch,prescaler:
+    type: int
+    default: 1
+    enum:
+      - 1
+      - 2
+      - 4
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+    description: |
+      Clock divider at the input of the LPTIM clock.

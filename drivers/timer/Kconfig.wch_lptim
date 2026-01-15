@@ -1,0 +1,12 @@
+# WCH LPTIM timer configuration options
+
+# Copyright (c) 2024 Scott King
+# SPDX-License-Identifier: Apache-2.0
+
+config WCH_LPTIM_TIMER
+	bool "WCH LPTIM timer"
+	default y
+	depends on DT_HAS_WCH_CH32_LPTIM_ENABLED
+	select TICKLESS_CAPABLE
+	help
+	  Enables the WCH LPTIM timer.
