@@ -20,7 +20,15 @@ static struct k_spinlock lock;
 static uint32_t accumulated_cycles;
 static uint32_t last_announcement_cycles;
 
-#define CYCLES_PER_TICK (sys_clock_hw_cycles_per_sec() / CONFIG_SYS_CLOCK_TICKS_PER_SEC)
+/* Get LSI frequency from Device Tree */
+#if DT_NODE_EXISTS(DT_NODELABEL(clk_lsi))
+#define LSI_FREQUENCY DT_PROP(DT_NODELABEL(clk_lsi), clock_frequency)
+#else
+#warning "LSI clock node not found in DTS, defaulting to 40kHz"
+#define LSI_FREQUENCY 40000
+#endif
+
+#define CYCLES_PER_TICK (LSI_FREQUENCY / CONFIG_SYS_CLOCK_TICKS_PER_SEC)
 
 static void lptim_irq_handler(const void *unused)
 {
