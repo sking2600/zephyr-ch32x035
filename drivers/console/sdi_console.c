@@ -3,8 +3,16 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <zephyr/devicetree.h>
+
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(sdi), okay)
+#define DMDATA0_ADDR DT_REG_ADDR(DT_NODELABEL(sdi))
+#define DMDATA1_ADDR (DMDATA0_ADDR + 4)
+#else
+// Fallback to V4 default if no node found
 #define DMDATA0_ADDR 0xe0000380
 #define DMDATA1_ADDR 0xe0000384
+#endif
 
 #define DMDATA0 (*(volatile uint32_t *)DMDATA0_ADDR)
 #define DMDATA1 (*(volatile uint32_t *)DMDATA1_ADDR)
@@ -13,24 +21,37 @@
 
 void sdi_console_init(void)
 {
-    // Usually no init needed for DMDATA, but we can ensure it's cleared
-    DMDATA0 = 0x84; // Reset state for minichlink
+    DMDATA1 = 0x00;
+    DMDATA0 = 0x80;
 }
 
 static void sdi_write_chunk(const char *buf, int len)
 {
     uint32_t timeout = SDI_TIMEOUT;
+
+    if (len > 7) len = 7;
+
     while ((DMDATA0 & 0x80) && timeout--) {
         // Wait for host to acknowledge previous data
     }
 
     if (timeout == 0) return;
 
-    char chunk[8] = {0};
-    memcpy(chunk, buf, len);
+    uint32_t d0 = (len + 4) | 0x80;
+    uint32_t d1 = 0;
+    uint8_t *p0 = (uint8_t *)&d0;
+    uint8_t *p1 = (uint8_t *)&d1;
 
-    DMDATA1 = *(uint32_t *)(chunk + 3);
-    DMDATA0 = (len + 4) | (chunk[0] << 8) | (chunk[1] << 16) | (chunk[2] << 24) | 0x80;
+    for (int i = 0; i < len; i++) {
+        if (i < 3) {
+            p0[i + 1] = buf[i];
+        } else {
+            p1[i - 3] = buf[i];
+        }
+    }
+
+    DMDATA1 = d1;
+    DMDATA0 = d0;
 }
 
 void sdi_console_puts(const char *str)
@@ -51,7 +72,7 @@ void sdi_console_puts(const char *str)
 
 void sdi_console_printf(const char *format, ...)
 {
-    char buf[256];
+    char buf[128];
     va_list args;
     va_start(args, format);
     int len = vsnprintf(buf, sizeof(buf), format, args);

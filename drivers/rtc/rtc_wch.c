@@ -7,9 +7,11 @@
 #define DT_DRV_COMPAT wch_ch32_rtc
 
 #include <zephyr/drivers/rtc.h>
+#include <zephyr/drivers/pm/pwr_wch.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys/timeutil.h>
+#include <zephyr/drivers/clock_control.h>
 #include <zephyr/irq.h>
 #include <soc.h>
 #include <errno.h>
@@ -23,6 +25,7 @@ LOG_MODULE_REGISTER(rtc, CONFIG_RTC_LOG_LEVEL);
 struct rtc_wch_config {
 	RTC_TypeDef *rtc;
 	const struct device *pfic_dev;
+	const struct device *pwr_dev;
 	void (*irq_config_func)(const struct device *dev);
 };
 
@@ -87,16 +90,20 @@ static int rtc_wch_set_time(const struct device *dev, const struct rtc_time *tim
 	k_mutex_lock(&data->lock, K_FOREVER);
 
 	/* Write to CNT registers */
+	wch_pwr_set_backup_access(cfg->pwr_dev, true);
 	if (rtc_wch_enter_config(cfg->rtc) != 0) {
+		wch_pwr_set_backup_access(cfg->pwr_dev, false);
 		k_mutex_unlock(&data->lock);
 		return -EIO;
 	}
 	cfg->rtc->CNTH = (counter >> 16) & 0xFFFF;
 	cfg->rtc->CNTL = (counter & 0xFFFF);
 	if (rtc_wch_exit_config(cfg->rtc) != 0) {
+		wch_pwr_set_backup_access(cfg->pwr_dev, false);
 		k_mutex_unlock(&data->lock);
 		return -EIO;
 	}
+	wch_pwr_set_backup_access(cfg->pwr_dev, false);
 
 	k_mutex_unlock(&data->lock);
 
@@ -156,7 +163,9 @@ static int rtc_wch_set_alarm(const struct device *dev, uint16_t id, const struct
 
 	k_mutex_lock(&data->lock, K_FOREVER);
 
+	wch_pwr_set_backup_access(cfg->pwr_dev, true);
 	if (rtc_wch_enter_config(cfg->rtc) != 0) {
+		wch_pwr_set_backup_access(cfg->pwr_dev, false);
 		k_mutex_unlock(&data->lock);
 		return -EIO;
 	}
@@ -167,9 +176,11 @@ static int rtc_wch_set_alarm(const struct device *dev, uint16_t id, const struct
 	cfg->rtc->CTLRH |= RTC_CTLRH_ALRIE;
 	
 	if (rtc_wch_exit_config(cfg->rtc) != 0) {
+		wch_pwr_set_backup_access(cfg->pwr_dev, false);
 		k_mutex_unlock(&data->lock);
 		return -EIO;
 	}
+	wch_pwr_set_backup_access(cfg->pwr_dev, false);
 
 	k_mutex_unlock(&data->lock);
 
@@ -228,15 +239,19 @@ static int rtc_wch_cancel_alarm(const struct device *dev, uint16_t id)
 
 	k_mutex_lock(&data->lock, K_FOREVER);
 
+	wch_pwr_set_backup_access(cfg->pwr_dev, true);
 	if (rtc_wch_enter_config(cfg->rtc) != 0) {
+		wch_pwr_set_backup_access(cfg->pwr_dev, false);
 		k_mutex_unlock(&data->lock);
 		return -EIO;
 	}
 	cfg->rtc->CTLRH &= ~RTC_CTLRH_ALRIE;
 	if (rtc_wch_exit_config(cfg->rtc) != 0) {
+		wch_pwr_set_backup_access(cfg->pwr_dev, false);
 		k_mutex_unlock(&data->lock);
 		return -EIO;
 	}
+	wch_pwr_set_backup_access(cfg->pwr_dev, false);
 	
 	data->alarm_callback = NULL;
 	data->alarm_user_data = NULL;
@@ -263,10 +278,12 @@ static void rtc_wch_isr(const struct device *dev)
 	struct rtc_wch_data *data = dev->data;
 	
 	if (cfg->rtc->CTLRL & RTC_CTLRL_ALR) {
+		wch_pwr_set_backup_access(cfg->pwr_dev, true);
 		if (rtc_wch_enter_config(cfg->rtc) == 0) {
 			cfg->rtc->CTLRL &= ~RTC_CTLRL_ALR; /* Clear alarm flag */
 			rtc_wch_exit_config(cfg->rtc);
 		}
+		wch_pwr_set_backup_access(cfg->pwr_dev, false);
 
 		if (data->alarm_callback) {
 			data->alarm_callback(dev, 0, data->alarm_user_data);
@@ -297,31 +314,59 @@ static int rtc_wch_init(const struct device *dev)
 
 	k_mutex_init(&data->lock);
 
-	/* Enable BKP and PWR clocks */
-	/* PWR(28) and BKP(27) bits in APB1PCENR */
-	RCC->APB1PCENR |= (1 << 28) | (1 << 27);
+	if (!device_is_ready(cfg->pwr_dev)) {
+		LOG_ERR("PWR device not ready");
+		return -ENODEV;
+	}
 
-	/* Enable access to Backup Domain */
-	PWR->CTLR |= PWR_CTLR_DBP;
+	/* Clocks for BKP and PWR are now handled by their respective drivers 
+	 * but we still need to ensure backup access is enabled for RTC init.
+	 */
+	wch_pwr_set_backup_access(cfg->pwr_dev, true);
+    
+    /* Enable BKP clock manually as it's needed for RTC and BBRAM */
+    RCC->APB1PCENR |= RCC_PB1Periph_BKP;
+
+    /* Enable RTC clock source (LSI) if not already enabled */
+    if (!(RCC->BDCTLR & RCC_RTCEN)) {
+        /* RTCSEL bits: 01:LSE, 10:LSI, 11:HSE/128 */
+        RCC->BDCTLR = (RCC->BDCTLR & ~RCC_RTCSEL) | RCC_RTCSEL_1;
+        RCC->BDCTLR |= RCC_RTCEN;
+    }
+
+    /* Set prescaler for 1Hz (assuming 40kHz LSI) */
+    if (rtc_wch_enter_config(cfg->rtc) == 0) {
+        cfg->rtc->PSCRH = 0;
+        cfg->rtc->PSCRL = 39999;
+        rtc_wch_exit_config(cfg->rtc);
+    }
 
 	/* Wait for Synch */
 	cfg->rtc->CTLRL &= ~RTC_CTLRL_RSF;
-	uint32_t timeout = 10000; /* 100ms */
+	uint32_t timeout = 100000; /* 1s */
 	while (!(cfg->rtc->CTLRL & RTC_CTLRL_RSF) && timeout > 0) {
 		k_busy_wait(10);
 		timeout--;
 	}
 	if (timeout == 0) {
+        LOG_ERR("RTC synchronization timeout");
+		wch_pwr_set_backup_access(cfg->pwr_dev, false);
 		return -EIO;
 	}
 	
 	/* Wait for last operation */
-	return rtc_wch_wait_rtoff(cfg->rtc);
+	int err = rtc_wch_wait_rtoff(cfg->rtc);
+	if (err != 0) {
+        LOG_ERR("RTC RTOFF timeout");
+		wch_pwr_set_backup_access(cfg->pwr_dev, false);
+		return err;
+	}
 
 #ifdef CONFIG_RTC_ALARM
 	cfg->irq_config_func(dev);
 #endif
 
+	wch_pwr_set_backup_access(cfg->pwr_dev, false);
 	return 0;
 }
 
@@ -347,6 +392,7 @@ static int rtc_wch_init(const struct device *dev)
 	static struct rtc_wch_data rtc_wch_data_##inst;                 \
 	static const struct rtc_wch_config rtc_wch_config_##inst = {    \
 		.rtc = (RTC_TypeDef *)DT_INST_REG_ADDR(inst),             \
+		.pwr_dev = DEVICE_DT_GET(DT_NODELABEL(pwr)),            \
 		RTC_WCH_IRQ_INIT(inst)                                  \
 	};                                                              \
 	DEVICE_DT_INST_DEFINE(inst, rtc_wch_init, NULL,                 \

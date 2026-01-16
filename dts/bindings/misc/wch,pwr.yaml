@@ -17,3 +17,11 @@ properties:
 
   clocks:
     required: false
+
+  pvd-level:
+    type: int
+    required: false
+    description: |
+      Programmable Voltage Detector (PVD) threshold level.
+      Refer to specific SoC documentation for level-to-voltage mapping.
+      Usually 0-7 or 0-3 depending on family.

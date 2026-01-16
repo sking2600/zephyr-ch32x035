@@ -16,3 +16,8 @@ properties:
 
   clocks:
     required: true
+
+  pwr-dev:
+    type: phandle
+    required: true
+    description: Phandle to the PWR controller.

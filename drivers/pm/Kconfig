@@ -17,4 +17,11 @@ config PM_WCH
 	help
 	  Enable support for the WCH Power Management [PWR] driver.
 
+config PM_WCH_INIT_PRIORITY
+	int "WCH PWR driver initialization priority"
+	default 40
+	depends on PM_WCH
+	help
+	  Initialization priority for the WCH PWR driver.
+
 endif # PM_DRIVERS
