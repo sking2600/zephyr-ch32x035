@@ -4,10 +4,6 @@
  * Assuming default pinctrl includes PA0.
  */
 
-/* Disable LPTIM to avoid system timer conflict */
-&lptim {
-	status = "disabled";
-};
 
 &adc1 {
 	status = "okay";

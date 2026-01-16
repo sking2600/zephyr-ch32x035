@@ -5,7 +5,6 @@
 
 config WCH_LPTIM_TIMER
 	bool "WCH LPTIM timer"
-	default y
 	depends on DT_HAS_WCH_CH32_LPTIM_ENABLED
 	select TICKLESS_CAPABLE
 	help
