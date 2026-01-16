@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Scott King
 # SPDX-License-Identifier: Apache-2.0
 
-description: WCH OPA (Operational Amplifier) sub-unit
+description: WCH OPA (Operational Amplifier) Child Node
 
 compatible: "wch,opa"
 
@@ -11,4 +11,33 @@ properties:
   index:
     type: int
     required: true
-    description: OPA unit index (1 or 2 typically)
+    description: OPA index/number (0 for OPA1, etc.)
+
+  gain:
+    type: int
+    required: false
+    description: |
+      PGA Gain setting.
+      Allowed values: 1 (buffer), 2, 4, 8, 16, 32, 64.
+      If not set, defaults to 1 (Buffer mode with external NSEL if not configured).
+    enum: [1, 2, 4, 8, 16, 32, 64]
+
+  input-positive:
+    type: int
+    required: false
+    description: |
+      Positive input MUX selection (PSEL).
+      Value mapping depends on specific chip.
+      0: CHP0
+      1: CHP1
+      ...
+    default: 0
+
+  input-negative:
+    type: int
+    required: false
+    description: |
+      Negative input MUX selection (NSEL).
+      Used when Gain is 1 (or Manual mode).
+      If Gain > 1, this property is ignored and internal resistors are used.
+    default: 0

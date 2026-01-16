@@ -40,7 +40,7 @@
 		};
 	};
 
-	soc {
+	soc: soc {
 		pfic: interrupt-controller@e000e000 {
 			compatible = "wch,pfic";
 			reg = <0xE000E000 0x400>;
@@ -410,4 +410,17 @@
 
 &cpu0 {
 	clock-frequency = <DT_FREQ_M(72)>;
+};
+&soc {
+	opacmp: opacmp@40026000 {
+			compatible = "wch,opacmp";
+			reg = <0x40026000 0x400>;
+			status = "disabled";
+
+			opa1: opa1 {
+				compatible = "wch,opa";
+				index = <1>;
+				status = "disabled";
+			};
+		};
 };

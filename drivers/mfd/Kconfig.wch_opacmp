@@ -1,9 +1,17 @@
-# Copyright (c) 2026 Scott King
+# Copyright (c) 2024 WCH
 # SPDX-License-Identifier: Apache-2.0
 
 config MFD_WCH_OPACMP
-	bool "WCH OPA/CMP MFD driver"
-	default y
-	depends on DT_HAS_WCH_OPACMP_ENABLED
-	help
-	  Enable the WCH OPA/CMP (Op-Amp and Comparator) MFD driver.
+    bool "WCH OPACMP MFD driver"
+    default y
+    depends on DT_HAS_WCH_OPACMP_ENABLED
+    help
+      Enable MFD driver for WCH OPACMP peripheral.
+
+config WCH_OPA
+    bool "WCH OPA driver"
+    default y
+    depends on DT_HAS_WCH_OPA_ENABLED
+    depends on MFD_WCH_OPACMP
+    help
+      Enable OPA driver for WCH.

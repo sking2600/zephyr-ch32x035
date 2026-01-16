@@ -1,0 +1,35 @@
+/* 
+ * Enable ADC and configure PA0 (Channel 0)
+ * Note: Check ch32l103_evt-pinctrl.dtsi for pinmux definitions.
+ * Assuming default pinctrl includes PA0.
+ */
+
+/* Disable LPTIM to avoid system timer conflict */
+&lptim {
+	status = "disabled";
+};
+
+&adc1 {
+	status = "okay";
+    vref-mv = <3300>;
+};
+
+&opacmp {
+	status = "okay";
+};
+
+&opa1 {
+	status = "okay";
+	gain = <8>;
+	input-positive = <4>; /* PA0 */
+	index = <0>;
+};
+
+/* Ensure PLL is enabled (reusing fix from USB) */
+&rcc {
+    clocks = <&pll>;
+};
+
+&cpu0 {
+    clock-frequency = <72000000>;
+};

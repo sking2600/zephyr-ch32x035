@@ -45,6 +45,7 @@ struct pwm_wch_gptm_config {
 	const struct device *clock_dev;
 	uint8_t clock_id;
 	uint16_t prescaler;
+	uint8_t rptcr;
 	const struct pinctrl_dev_config *pin_cfg;
 };
 
@@ -71,22 +72,28 @@ static int pwm_wch_gptm_set_cycles(const struct device *dev, uint32_t channel,
 		ocxm = CHCTLR_OCXM_PWM_MODE1;
 	}
 
+#define TIM_OCPE       0x08
+
 	switch (channel) {
 	case 0:
 		regs->CH1CVR = pulse_cycles;
-		regs->CHCTLR1 = (regs->CHCTLR1 & ~TIM_OC1M) | (ocxm << CHCTLR_OCXM_ODD_SHIFT);
+		regs->CHCTLR1 = (regs->CHCTLR1 & ~TIM_OC1M) | (ocxm << CHCTLR_OCXM_ODD_SHIFT) |
+				TIM_OCPE;
 		break;
 	case 1:
 		regs->CH2CVR = pulse_cycles;
-		regs->CHCTLR1 = (regs->CHCTLR1 & ~TIM_OC2M) | (ocxm << CHCTLR_OCXM_EVEN_SHIFT);
+		regs->CHCTLR1 = (regs->CHCTLR1 & ~TIM_OC2M) | (ocxm << CHCTLR_OCXM_EVEN_SHIFT) |
+				(TIM_OCPE << 8);
 		break;
 	case 2:
 		regs->CH3CVR = pulse_cycles;
-		regs->CHCTLR2 = (regs->CHCTLR2 & ~TIM_OC3M) | (ocxm << CHCTLR_OCXM_ODD_SHIFT);
+		regs->CHCTLR2 = (regs->CHCTLR2 & ~TIM_OC3M) | (ocxm << CHCTLR_OCXM_ODD_SHIFT) |
+				TIM_OCPE;
 		break;
 	case 3:
 		regs->CH4CVR = pulse_cycles;
-		regs->CHCTLR2 = (regs->CHCTLR2 & ~TIM_OC4M) | (ocxm << CHCTLR_OCXM_EVEN_SHIFT);
+		regs->CHCTLR2 = (regs->CHCTLR2 & ~TIM_OC4M) | (ocxm << CHCTLR_OCXM_EVEN_SHIFT) |
+				(TIM_OCPE << 8);
 		break;
 	default:
 		return -EINVAL;
@@ -189,7 +196,7 @@ static int pwm_wch_gptm_disable_dma(const struct device *dev, uint32_t channel)
 }
 #endif /* CONFIG_PWM_WITH_DMA */
 
-static DEVICE_API(pwm, pwm_wch_gptm_driver_api) = {
+static const struct pwm_driver_api pwm_wch_gptm_driver_api = {
 	.set_cycles = pwm_wch_gptm_set_cycles,
 	.get_cycles_per_sec = pwm_wch_gptm_get_cycles_per_sec,
 #ifdef CONFIG_PWM_WITH_DMA
@@ -212,13 +219,34 @@ static int pwm_wch_gptm_init(const struct device *dev)
 	}
 
 	/* Disable and configure the counter */
+	/*
+	 * CTLR1 = TIM_ARPE (0x0080)
+	 * This implies:
+	 * - CKD (Clock Division) = 00 (tDTS = tCK_INT)
+	 * - CMS (Center-aligned Mode Sequence) = 00 (Edge-aligned)
+	 * - DIR (Direction) = 0 (Up counter)
+	 * - OPM (One Pulse Mode) = 0
+	 * - URS (Update Request Source) = 0
+	 * - UDIS (Update Disable) = 0
+	 */
 	regs->CTLR1 = TIM_ARPE;
+
 	regs->PSC = config->prescaler;
 
 #if defined(TIM1_BASE)
 	if ((uintptr_t)regs == TIM1_BASE) {
-		/* Enable Main Output for advanced timers */
-		regs->BDTR |= TIM_MOE;
+		/*
+		 * For advanced timers (TIM1), ensure RPTCR is set to the configured value
+		 * (default 0) and BDTR is clean.
+		 * RPTCR (Repetition Counter) delays update events by (RPTCR+1) cycles.
+		 */
+		regs->RPTCR = config->rptcr;
+
+		/*
+		 * BDTR (Break and Dead-Time Register).
+		 * Clear everything (OSSI, OSSR, DTG, LOCK, etc.) and enable MOE.
+		 */
+		regs->BDTR = TIM_MOE;
 	}
 #endif
 
@@ -233,6 +261,7 @@ static int pwm_wch_gptm_init(const struct device *dev)
 	static const struct pwm_wch_gptm_config pwm_wch_gptm_##idx##_config = {                    \
 		.regs = (TIM_TypeDef *)DT_REG_ADDR(DT_INST_PARENT(idx)),                           \
 		.prescaler = DT_INST_PROP(idx, prescaler),                                         \
+		.rptcr = DT_INST_PROP_OR(idx, wch_repetition_counter, 0),                          \
 		.clock_dev = DEVICE_DT_GET(DT_CLOCKS_CTLR(DT_INST_PARENT(idx))),                   \
 		.clock_id = DT_CLOCKS_CELL(DT_INST_PARENT(idx), id),                               \
 		.pin_cfg = PINCTRL_DT_INST_DEV_CONFIG_GET(idx),                                    \

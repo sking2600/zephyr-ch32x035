@@ -171,7 +171,12 @@ static int dma_wch_config(const struct device *dev, uint32_t ch, struct dma_conf
 		return -ENOTSUP;
 	}
 
-	cntr = dma_cfg->head_block->block_size;
+	/* Zephyr block_size is in bytes, but CNTR expects number of items. */
+	if (dma_cfg->channel_direction == MEMORY_TO_PERIPHERAL) {
+		cntr = dma_cfg->head_block->block_size / dma_cfg->dest_data_size;
+	} else {
+		cntr = dma_cfg->head_block->block_size / dma_cfg->source_data_size;
+	}
 
 	switch (dma_cfg->channel_direction) {
 	case MEMORY_TO_MEMORY:
@@ -464,6 +469,7 @@ static void dma_wch_isr(const struct device *dev, uint32_t chan)
 	const struct dma_wch_config *config = dev->config;
 	struct dma_wch_regs *regs = config->regs;
 	uint32_t intfr = regs->base.INTFR;
+
 
 	intfr &= (DMA_WCH_AIF << DMA_WCH_IF_OFF(chan));
 	if (intfr & DMA_TCIF1 << DMA_WCH_IF_OFF(chan)) {

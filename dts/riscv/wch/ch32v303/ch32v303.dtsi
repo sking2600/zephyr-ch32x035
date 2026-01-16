@@ -198,6 +198,23 @@
 			status = "okay";
 		};
 
+		adc1: adc@40012400 {
+			compatible = "wch,ch32-adc", "wch,adc";
+			reg = <0x40012400 0x400>;
+			clocks = <&rcc CH32V20X_V30X_CLOCK_ADC1>;
+			interrupt-parent = <&pfic>;
+			interrupts = <34>;
+			status = "disabled";
+			#io-channel-cells = <1>;
+            vref-mv = <3300>;
+		};
+
+		opacmp: opacmp@40026000 {
+			compatible = "wch,opacmp";
+			reg = <0x40026000 0x1000>;
+			status = "disabled";
+		};
+
 		dma1: dma@40020000 {
 			compatible = "wch,wch-dma";
 			reg = <0x40020000 0x90>;

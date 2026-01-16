@@ -8,6 +8,13 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/irq.h>
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/sys/printk.h>
+/* Hacky LED debug: PA8 is LED. Direct register access. */
+#define GPIOA_BASE 0x40010800
+#define GPIOA_CFGHR (*(volatile uint32_t *)(GPIOA_BASE + 0x04))
+#define GPIOA_BSHR (*(volatile uint32_t *)(GPIOA_BASE + 0x10))
+#define GPIOA_BCR  (*(volatile uint32_t *)(GPIOA_BASE + 0x14))
+#define RCC_APB2PCENR (*(volatile uint32_t *)(0x40021000 + 0x18))
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/dt-bindings/clock/ch32l103_clock.h>
 #include <zephyr/usb/usb_ch9.h>
@@ -212,6 +219,9 @@ static enum udc_bus_speed wch_usbfs_device_speed(const struct device *dev)
 
 static int wch_usbfs_enable(const struct device *dev)
 {
+	printk("DEBUG: wch_usbfs_enable\n");
+    /* Flash LED to indicate ENABLE reached */
+    GPIOA_BCR = (1 << 8); k_busy_wait(100000); GPIOA_BSHR = (1 << 8);
 	const struct wch_usbfs_config *cfg = dev->config;
 	WCH_USBFS_RegDef *usb = (WCH_USBFS_RegDef *)cfg->base;
 
@@ -256,6 +266,25 @@ static int wch_usbfs_disable(const struct device *dev)
 
 static int wch_usbfs_init(const struct device *dev)
 {
+	printk("DEBUG: wch_usbfs_init\n");
+    /* Enable GPIOA and set PA8 as output push-pull */
+    RCC_APB2PCENR |= (1 << 2); /* IOP A EN */
+    GPIOA_CFGHR &= ~(0xF << 0); /* PA8 clear */
+    GPIOA_CFGHR |= (0x3 << 0);  /* PA8 Output 50MHz Push-Pull */
+    GPIOA_BSHR = (1 << 8);      /* PA8 High: Driver Loaded */
+    
+    /* PB3 Debug LED (User Request) */
+    RCC_APB2PCENR |= (1 << 3); /* IOP B EN */
+    GPIOB->CFGHR &= ~(0xF << 12); /* PB3 clear */
+    GPIOB->CFGHR |= (0x3 << 12);  /* PB3 Output 50MHz Push-Pull */
+    GPIOB->BSHR = (1 << 3);       /* PB3 High */
+    
+    /* PB3 Debug LED (User Request) */
+    RCC_APB2PCENR |= (1 << 3); /* IOP B EN */
+    GPIOB->CFGHR &= ~(0xF << 12); /* PB3 clear */
+    GPIOB->CFGHR |= (0x3 << 12);  /* PB3 Output 50MHz Push-Pull */
+    GPIOB->BSHR = (1 << 3);       /* PB3 High */
+
 	const struct wch_usbfs_config *cfg = dev->config;
 	WCH_USBFS_RegDef *usb = (WCH_USBFS_RegDef *)cfg->base;
 	int ret;
@@ -372,15 +401,21 @@ static int wch_usbfs_driver_init(const struct device *dev)
 	int i;
 
 #if defined(CONFIG_SOC_CH32L103)
-	/* DEBUG: 3 SLOW blinks on PC13 at USB driver init entry */
+	/* DEBUG: 3 SLOW blinks on PA8/PB3 at USB driver init entry */
 	{
 		volatile uint32_t d;
 		int b;
+        RCC_APB2PCENR |= (1 << 2) | (1 << 3); /* Enable IOPA, IOPB */
+        GPIOA_CFGHR &= ~(0xF << 0); GPIOA_CFGHR |= (0x3 << 0); /* PA8 Output */
+        GPIOB->CFGHR &= ~(0xF << 12); GPIOB->CFGHR |= (0x3 << 12); /* PB3 Output */
+        
 		for (b = 0; b < 3; b++) {
-			GPIOC->BCR = (1 << 13);  /* LED ON */
-			for (d = 0; d < 1000000; d++) { __asm__ volatile("nop"); }
-			GPIOC->BSHR = (1 << 13); /* LED OFF */
-			for (d = 0; d < 1000000; d++) { __asm__ volatile("nop"); }
+			GPIOA_BSHR = (1 << 8);  /* PA8 ON */
+            GPIOB->BSHR = (1 << 3); /* PB3 ON */
+			for (d = 0; d < 2000000; d++) { __asm__ volatile("nop"); }
+			GPIOA_BCR = (1 << 8);   /* PA8 OFF */
+            GPIOB->BCR = (1 << 3);  /* PB3 OFF */
+			for (d = 0; d < 2000000; d++) { __asm__ volatile("nop"); }
 		}
 	}
 #endif
@@ -518,8 +553,9 @@ static void wch_usbfs_isr_transfer(const struct device *dev)
 	usb->INT_FG = WCH_USBFS_UIF_TRANSFER;
 }
 
-static void handle_setup(const struct device *dev)
+static int handle_setup(const struct device *dev)
 {
+	printk("DEBUG: handle_setup\n");
 	struct wch_usbfs_data *priv = udc_get_private(dev);
 	struct net_buf *buf;
 
@@ -547,6 +583,7 @@ static void handle_setup(const struct device *dev)
 			udc_ctrl_submit_s_status(dev);
 		}
 	}
+	return 0;
 }
 
 static void handle_transfer_in(const struct device *dev, uint8_t ep_idx)
@@ -640,6 +677,12 @@ static void wch_usbfs_thread_handler(void *arg1, void *arg2, void *arg3)
 
 static void wch_usbfs_isr(const struct device *dev)
 {
+	/* printk("DEBUG: ISR\n"); */
+    /* Toggle LED on ISR */
+    static int toggle = 0;
+    if (toggle) GPIOA_BSHR = (1 << 8); else GPIOA_BCR = (1 << 8);
+    toggle = !toggle;
+
 	const struct wch_usbfs_config *config = dev->config;
 	WCH_USBFS_RegDef *usb = (WCH_USBFS_RegDef *)config->base;
 	uint8_t intflag = usb->INT_FG;

@@ -45,6 +45,10 @@ void sdi_console_puts(const char *str)
     }
 }
 
+#include <zephyr/init.h>
+#include <zephyr/sys/printk-hooks.h>
+#include <zephyr/sys/libc-hooks.h>
+
 void sdi_console_printf(const char *format, ...)
 {
     char buf[256];
@@ -57,3 +61,23 @@ void sdi_console_printf(const char *format, ...)
         sdi_console_puts(buf);
     }
 }
+
+static int sdi_console_out(int character)
+{
+    char c = (char)character;
+    sdi_write_chunk(&c, 1);
+    return character;
+}
+
+static int sdi_console_sys_init(void)
+{
+    sdi_console_init();
+    __printk_hook_install(sdi_console_out);
+    __stdout_hook_install(sdi_console_out);
+    return 0;
+}
+
+
+
+// SYS_INIT commented out to verify boot
+SYS_INIT(sdi_console_sys_init, PRE_KERNEL_1, CONFIG_CONSOLE_INIT_PRIORITY);

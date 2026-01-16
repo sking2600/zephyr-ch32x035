@@ -16,6 +16,14 @@ properties:
     required: true
     description: Clock prescaler value for the timer
 
+  wch,repetition-counter:
+    type: int
+    description: |
+      Repetition counter value (0-255).
+      Only applies to advanced timers (TIM1).
+      Defines the number of intermediate overflow/underflow events before an update event is generated.
+      Equation -> Update_Event_Rate = (Event_Rate) / (RPTCR + 1)
+
 pwm-cells:
   - channel
   - period

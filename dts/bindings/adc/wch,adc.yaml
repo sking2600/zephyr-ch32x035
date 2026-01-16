@@ -24,10 +24,10 @@ properties:
       Reference voltage in mV. This is typically VDD.
 
   pinctrl-0:
-    required: true
+    required: false
 
   pinctrl-names:
-    required: true
+    required: false
 
   "#io-channel-cells":
     const: 1

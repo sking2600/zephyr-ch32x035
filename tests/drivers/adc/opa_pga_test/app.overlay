@@ -1,0 +1,20 @@
+/* Enable MFD and OPA */
+&opacmp {
+    status = "okay";
+};
+
+&opa1 {
+    status = "okay";
+    gain = <8>;
+    input-positive = <4>; /* CHP4 = PA0 */
+    input-negative = <7>; /* CHN_PGA_8xIN = 7 (Matched driver logic, verify header consts) */
+    /* Wait, driver calculates NSEL from gain. input-negative prop is irrelevant/override? 
+       My driver used `gain` to override NSEL. 
+       Let's assume default behavior.
+    */
+};
+
+&adc1 {
+    status = "okay";
+    /* Increase sample time for OPA impedance? */
+};

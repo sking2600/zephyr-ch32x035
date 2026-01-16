@@ -1,0 +1,7 @@
+&pwm1 {
+	wch,repetition-counter = <7>;
+};
+
+&usart1 {
+	current-speed = <9600>;
+};

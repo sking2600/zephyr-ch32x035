@@ -1,0 +1,20 @@
+&lptim {
+	status = "disabled";
+};
+
+&usbfs {
+	status = "okay";
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+		label = "CDC_ACM_0";
+		hw-flow-control;
+	};
+};
+
+&rcc {
+    clocks = <&pll>;
+};
+
+&cpu0 {
+    clock-frequency = <72000000>;
+};
