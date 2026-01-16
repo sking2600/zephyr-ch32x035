@@ -11,13 +11,23 @@
 #include <zephyr/logging/log.h>
 #include <soc.h>
 
+/* Place critical functions in RAM via .data section */
+#define RAMFUNC __attribute__((section(".data"), noinline))
+
 LOG_MODULE_REGISTER(flash_wch, CONFIG_FLASH_LOG_LEVEL);
 
 /* FLASH Keys */
 #define FLASH_KEY1                 ((uint32_t)0x45670123)
 #define FLASH_KEY2                 ((uint32_t)0xCDEF89AB)
 
-#define FLASH_TIMEOUT_COUNT        0x100000
+/* Timeout in loop iterations (empirically tuned, ~50ms at 8MHz) */
+#define FLASH_TIMEOUT_LOOPS        400000
+
+/* Hardware Buffer Size for Fast Program */
+#define FLASH_PAGE_SIZE            128
+
+/* Erase Page Size (256 bytes for CH32L1xx) */
+#define FLASH_ERASE_SIZE           256
 
 struct flash_wch_config {
 	FLASH_TypeDef *regs;
@@ -32,7 +42,18 @@ static const struct flash_parameters flash_wch_parameters = {
 	.erase_value = 0xff,
 };
 
-static inline void flash_wch_unlock(FLASH_TypeDef *regs)
+/*
+ * Simple delay loop, runs entirely from RAM.
+ * Avoids any Flash access.
+ */
+static RAMFUNC void flash_wch_delay(volatile uint32_t count)
+{
+	while (count--) {
+		__asm__ volatile("nop");
+	}
+}
+
+static RAMFUNC void flash_wch_unlock(FLASH_TypeDef *regs)
 {
 	regs->KEYR = FLASH_KEY1;
 	regs->KEYR = FLASH_KEY2;
@@ -40,21 +61,26 @@ static inline void flash_wch_unlock(FLASH_TypeDef *regs)
 	regs->MODEKEYR = FLASH_KEY2;
 }
 
-static inline void flash_wch_lock(FLASH_TypeDef *regs)
+static RAMFUNC void flash_wch_lock(FLASH_TypeDef *regs)
 {
 	regs->CTLR |= FLASH_CTLR_LOCK | FLASH_CTLR_FLOCK;
 }
 
-static int flash_wch_wait_bsy(FLASH_TypeDef *regs)
+/*
+ * Wait for Busy flag. Runs from RAM.
+ * Returns 0 on success, -ETIMEDOUT on timeout.
+ */
+static RAMFUNC int flash_wch_wait_bsy(FLASH_TypeDef *regs)
 {
-	int i;
+	uint32_t timeout = FLASH_TIMEOUT_LOOPS;
 
-	for (i = 0; i < FLASH_TIMEOUT_COUNT; i++) {
-		if (!(regs->STATR & FLASH_STATR_BSY)) {
-			return 0;
+	while (regs->STATR & FLASH_STATR_BSY) {
+		if (--timeout == 0) {
+			return -ETIMEDOUT;
 		}
+		flash_wch_delay(10);
 	}
-	return -ETIMEDOUT;
+	return 0;
 }
 
 static int flash_wch_read(const struct device *dev, off_t offset,
@@ -70,39 +96,54 @@ static int flash_wch_read(const struct device *dev, off_t offset,
 	return 0;
 }
 
-static int flash_wch_write_page(FLASH_TypeDef *regs, off_t pg_addr, const uint32_t *data, size_t count)
+/*
+ * Program a single block using Fast Program (up to 128 bytes).
+ * Must be called with interrupts locked and flash unlocked.
+ */
+static RAMFUNC int flash_wch_program_block(FLASH_TypeDef *regs, off_t addr,
+					   const uint32_t *data, size_t count)
 {
 	int rc;
 	size_t i;
 
+	/* 1. Set FTPG (Fast Program) */
 	regs->CTLR |= FLASH_CTLR_FTPG;
+
+	/* 2. Reset Buffer */
 	regs->CTLR |= FLASH_CTLR_BUFRST;
 	rc = flash_wch_wait_bsy(regs);
-	if (rc < 0) return rc;
-
-	/* Load words into buffer */
-	for (i = 0; i < count; i++) {
-		volatile uint32_t *addr = (volatile uint32_t *)(FLASH_BASE + pg_addr + (i * 4));
-		*addr = data[i];
-		regs->CTLR |= FLASH_CTLR_BUFLOAD;
-		rc = flash_wch_wait_bsy(regs);
-		if (rc < 0) return rc;
+	if (rc < 0) {
+		regs->CTLR &= ~FLASH_CTLR_FTPG;
+		return rc;
 	}
 
-	/* Trigger programming */
-	regs->ADDR = FLASH_BASE + pg_addr;
+	/* 3. Load words into buffer */
+	for (i = 0; i < count; i++) {
+		volatile uint32_t *dest = (volatile uint32_t *)(FLASH_BASE + addr + (i * 4));
+		*dest = data[i];
+
+		/* 4. Trigger BUFLOAD for this word */
+		regs->CTLR |= FLASH_CTLR_BUFLOAD;
+		/* Brief delay for buffer load, no BSY wait per word */
+		flash_wch_delay(5);
+	}
+
+	/* 5. Trigger programming Start */
+	regs->ADDR = FLASH_BASE + addr;
 	regs->CTLR |= FLASH_CTLR_STRT;
+
+	/* 6. Wait for completion */
 	rc = flash_wch_wait_bsy(regs);
-	
+
+	/* 7. Clear FTPG */
 	regs->CTLR &= ~FLASH_CTLR_FTPG;
 
 	return rc;
 }
 
-static int flash_wch_write(const struct device *dev, off_t offset,
-			   const void *data, size_t len)
+static RAMFUNC int flash_wch_write_ram(const struct device *dev, off_t offset,
+				       const void *data, size_t len)
 {
-	struct flash_wch_data *dev_data = dev->data;
 	const struct flash_wch_config *cfg = dev->config;
 	int rc = 0;
 	const uint8_t *src = data;
@@ -111,29 +152,22 @@ static int flash_wch_write(const struct device *dev, off_t offset,
 		return -EINVAL;
 	}
 
-	k_sem_take(&dev_data->sem, K_FOREVER);
 	flash_wch_unlock(cfg->regs);
 
-	flash_wch_wait_bsy(cfg->regs);
+	rc = flash_wch_wait_bsy(cfg->regs);
+	if (rc < 0) {
+		goto out;
+	}
 
-	/* Write in 256-byte page chunks */
+	/* Write in 128-byte page chunks (Hardware Buffer Size) */
 	while (len > 0) {
-		off_t pg_offset = offset & (256 - 1);
-		size_t write_len = 256 - pg_offset;
+		off_t pg_offset = offset & (FLASH_PAGE_SIZE - 1);
+		size_t write_len = FLASH_PAGE_SIZE - pg_offset;
 		if (write_len > len) {
 			write_len = len;
 		}
 
-		/* Since we can't easily do partial page updates if we need to preserve other data in the same page
-		   without reading it back, we rely on the fact that BUF_RST sets latches to '1'.
-		   If NVS writes sequentially, it's fine.
-		   The loop below only writes the 'new' data. The other latches in the page buffer
-		   should effectively be No-Ops if they are '1'.
-		   However, if write_len is small (e.g. 4 bytes), we still need to initiate the whole Page Program sequence.
-		*/
-		
-		/* We must pass strictly 32-bit words */
-		rc = flash_wch_write_page(cfg->regs, offset, (const uint32_t *)src, write_len / 4);
+		rc = flash_wch_program_block(cfg->regs, offset, (const uint32_t *)src, write_len / 4);
 		if (rc < 0) {
 			break;
 		}
@@ -143,35 +177,47 @@ static int flash_wch_write(const struct device *dev, off_t offset,
 		len -= write_len;
 	}
 
+out:
 	flash_wch_lock(cfg->regs);
+	return rc;
+}
+
+static int flash_wch_write(const struct device *dev, off_t offset,
+			   const void *data, size_t len)
+{
+	struct flash_wch_data *dev_data = dev->data;
+	unsigned int key;
+	int rc;
+
+	k_sem_take(&dev_data->sem, K_FOREVER);
+	key = irq_lock();
+
+	rc = flash_wch_write_ram(dev, offset, data, len);
+
+	irq_unlock(key);
 	k_sem_give(&dev_data->sem);
 
 	return rc;
 }
 
-static int flash_wch_erase(const struct device *dev, off_t offset,
-			   size_t len)
+static RAMFUNC int flash_wch_erase_ram(const struct device *dev, off_t offset, size_t len)
 {
-	struct flash_wch_data *dev_data = dev->data;
 	const struct flash_wch_config *cfg = dev->config;
 	int rc = 0;
 
-	/* Supports 256-byte page erase */
-	if ((offset % 256 != 0) || (len % 256 != 0)) {
-		LOG_ERR("Erase offset/len must be 256-byte aligned");
-		return -EINVAL;
-	}
-
-	k_sem_take(&dev_data->sem, K_FOREVER);
 	flash_wch_unlock(cfg->regs);
 
-	flash_wch_wait_bsy(cfg->regs);
+	rc = flash_wch_wait_bsy(cfg->regs);
+	if (rc < 0) {
+		goto out;
+	}
 
 	while (len > 0) {
+		/* Fast Page Erase (256 bytes) */
 		cfg->regs->CTLR |= FLASH_CTLR_FTER;
 		cfg->regs->ADDR = FLASH_BASE + offset;
 		cfg->regs->CTLR |= FLASH_CTLR_STRT;
-		
+
 		rc = flash_wch_wait_bsy(cfg->regs);
 		cfg->regs->CTLR &= ~FLASH_CTLR_FTER;
 
@@ -179,11 +225,33 @@ static int flash_wch_erase(const struct device *dev, off_t offset,
 			break;
 		}
 
-		offset += 256;
-		len -= 256;
+		offset += FLASH_ERASE_SIZE;
+		len -= FLASH_ERASE_SIZE;
 	}
 
+out:
 	flash_wch_lock(cfg->regs);
+	return rc;
+}
+
+static int flash_wch_erase(const struct device *dev, off_t offset, size_t len)
+{
+	struct flash_wch_data *dev_data = dev->data;
+	unsigned int key;
+	int rc;
+
+	/* Erase must be aligned to FLASH_ERASE_SIZE */
+	if ((offset % FLASH_ERASE_SIZE != 0) || (len % FLASH_ERASE_SIZE != 0)) {
+		LOG_ERR("Erase offset/len must be %d-byte aligned", FLASH_ERASE_SIZE);
+		return -EINVAL;
+	}
+
+	k_sem_take(&dev_data->sem, K_FOREVER);
+	key = irq_lock();
+
+	rc = flash_wch_erase_ram(dev, offset, len);
+
+	irq_unlock(key);
 	k_sem_give(&dev_data->sem);
 
 	return rc;
@@ -199,8 +267,8 @@ flash_wch_get_parameters(const struct device *dev)
 
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
 static const struct flash_pages_layout flash_wch_pages_layout_node = {
-	.pages_count = DT_REG_SIZE(DT_NODELABEL(flash0)) / 256,
-	.pages_size = 256,
+	.pages_count = DT_REG_SIZE(DT_NODELABEL(flash0)) / FLASH_ERASE_SIZE,
+	.pages_size = FLASH_ERASE_SIZE,
 };
 
 static void flash_wch_pages_layout(const struct device *dev,
@@ -233,7 +301,6 @@ static int flash_wch_init(const struct device *dev)
 
 #define FLASH_WCH_INIT(n)						\
 	static struct flash_wch_data flash_wch_data_##n;		\
-									\
 	static const struct flash_wch_config flash_wch_config_##n = {	\
 		.regs = (FLASH_TypeDef *)DT_INST_REG_ADDR(n),		\
 	};								\
