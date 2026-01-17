@@ -1,0 +1,13 @@
+description: WCH SDI Console
+
+compatible: "wch,sdi-console"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+    description: |
+      Base address of the DMDATA0 register.
+      For most QingKe cores (V2/V3/V4), this is 0xe0000380.
+      For V003/X035 (partially), it might differ.

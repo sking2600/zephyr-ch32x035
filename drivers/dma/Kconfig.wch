@@ -1,9 +1,14 @@
 # Copyright (c) 2024 Paul Wedeck <paulwedeck@gmail.com>
+# Copyright (c) 2026 Scott King
 # SPDX-License-Identifier: Apache-2.0
 
-config DMA_WCH
-	bool "CH32V DMA driver"
+config DMA_CH32
+	bool "WCH CH32 DMA controller driver"
 	default y
 	depends on DT_HAS_WCH_DMA_ENABLED
+	select DMA_HAS_CHANNEL_FILTER
 	help
-	  DMA driver for the WCH CH32V SoC family.
+	  Enable DMA support for WCH CH32V/CH32L/CH32X series MCUs.
+	  This driver supports the DMA controller found on CH32V003,
+	  CH32V103, CH32V203, CH32V307, CH32L103, CH32X035, and similar parts.
+	  Each DMA controller instance (DMA1, DMA2) is handled separately.

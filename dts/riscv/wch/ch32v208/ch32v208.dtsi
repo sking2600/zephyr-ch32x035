@@ -63,6 +63,8 @@
 		pwr: pwr@40007000 {
 			compatible = "wch,pwr";
 			reg = <0x40007000 16>;
+			clocks = <&rcc CH32V20X_V30X_CLOCK_PWR>;
+			status = "okay";
 		};
 
 		iwdg: watchdog@40003000 {

@@ -8,6 +8,9 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
 
+extern void sdi_console_init(void);
+extern void sdi_console_printf(const char *format, ...);
+
 /* The devicetree node identifier for the "led0" alias. */
 #define LED0_NODE DT_ALIAS(led0)
 
@@ -17,24 +20,16 @@ int main(void)
 {
 	int ret;
 
-	if (!gpio_is_ready_dt(&led)) {
-		return 0;
-	}
-
-	ret = gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
-	if (ret < 0) {
-		return 0;
-	}
-    
-    printk("Driver Port Verification @ 72MHz\n");
+    sdi_console_init();
+    sdi_console_printf("Driver Port Verification @ %u Hz (SDI)\n", sys_clock_hw_cycles_per_sec());
 
 	while (1) {
 		ret = gpio_pin_toggle_dt(&led);
 		if (ret < 0) {
 			return 0;
 		}
-        printk("Ping: %lld ms\n", k_uptime_get());
-		k_msleep(1000); // Should be 1s if clock is 72MHz
+        sdi_console_printf("Ping: %lld ms\n", k_uptime_get());
+		k_msleep(1000);
 	}
 	return 0;
 }

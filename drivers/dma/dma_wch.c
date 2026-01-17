@@ -15,8 +15,12 @@ LOG_MODULE_REGISTER(dma_wch);
 
 #include <hal_ch32fun.h>
 
+#ifndef DMA_WCH_MAX_CHAN
 #define DMA_WCH_MAX_CHAN      11
+#endif
+#ifndef DMA_WCH_MAX_CHAN_BASE
 #define DMA_WCH_MAX_CHAN_BASE 8
+#endif
 
 #define DMA_WCH_AIF        (DMA_GIF1 | DMA_TCIF1 | DMA_HTIF1 | DMA_TEIF1)
 #define DMA_WCH_IF_OFF(ch) (4 * (ch))
@@ -473,7 +477,9 @@ static void dma_wch_isr(const struct device *dev, uint32_t chan)
 
 	intfr &= (DMA_WCH_AIF << DMA_WCH_IF_OFF(chan));
 	if (intfr & DMA_TCIF1 << DMA_WCH_IF_OFF(chan)) {
-		regs->channels[chan].CFGR &= ~DMA_CFGR1_EN;
+		if (!(regs->channels[chan].CFGR & DMA_CFGR1_CIRC)) {
+			regs->channels[chan].CFGR &= ~DMA_CFGR1_EN;
+		}
 	}
 	regs->base.INTFCR = intfr;
 

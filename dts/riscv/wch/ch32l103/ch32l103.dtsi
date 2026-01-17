@@ -195,7 +195,7 @@
 
 		dma1: dma@40020000 {
 			compatible = "wch,dma";
-			reg = <0x40020000 0x90>;
+			reg = <0x40020000 0xa8>;
 			clocks = <&rcc RCC_AHB_DMA1>;
 			#dma-cells = <1>;
 			interrupt-parent = <&pfic>;

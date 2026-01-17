@@ -234,36 +234,38 @@ static int clock_control_wch_rcc_init(const struct device *dev)
 	/* Clear the interrupt flags. */
 	RCC->INTR = RCC_CSSC | RCC_PLLRDYC | RCC_HSERDYC | RCC_LSIRDYC;
 
-	/* Configure USBPRE for 48MHz (Bits 23:22) */
+	/* Configure USBPRE based on SystemCoreClock */
+	/* CH32L103: USBCLK = 48MHz required */
 	RCC->CFGR0 &= ~RCC_CFGR0_USBPRE;
-	if (WCH_RCC_SYSCLK == 96000000) {
-		/* PLL / 2 = 48MHz (Bit 23=0, Bit 22=1) */
-		RCC->CFGR0 |= (1 << 22);
-	} else if (WCH_RCC_SYSCLK == 72000000) {
-		/* PLL / 1.5 = 48MHz (Bit 23=1, Bit 22=0) -> pattern 0x2 */
-		RCC->CFGR0 |= (2 << 22);
-	} else if (WCH_RCC_SYSCLK == 48000000) {
-		/* PLL / 1 = 48MHz. Assuming Bit 22=1 is Div1 for CH32L103 (Verify!) */
-        /* Actually standard STM32 USBPRE: 0=Div1.5, 1=Div1. */
-        /* CH32L103 might use 2 bits. Let's try setting Bit 22=1 (0x1) based on previous 96MHz logic (where 1<<22 was Div2?? No, usually 96/2=48). */
-        /* Wait. If 1<<22 is Div2, then what is Div1? */
-        /* Let's look at Ch32L103 Reference. I'll guess standard approach: */
-        /* If 48MHz PLL, we need Div1. */
-        /* Testing 0x00 (Cleared) first? Or 0x01? */
-        /* If 0x01 (1<<22) was Div2, maybe 0x00 is Div1? */
-        /* I will set 0x1 (Div1) assuming standard behavior for now, or check bit 23. */
-        /* Actually, I'll clear it (0x0) for now, as Div1 is often default? */
-        /* No, usually 0 is Div1.5. */
-        /* I will set RCC_CFGR0_USBPRE (Bit 22) if defined. */
-        /* Let's try forcing 1<<22 (0x400000) which is typically USBPRE=1 -> PLL/1. */
-        RCC->CFGR0 |= (1 << 22);
+#if defined(CONFIG_SOC_CH32L103)
+	/* 
+	 * CH32L103 Reference Manual:
+     * Bit [23:22] USBPRE[1:0]
+     * 00: /1   (for PLL=48MHz)
+     * 01: /2   (for PLL=96MHz)
+     * 10: /1.5 (for PLL=72MHz)
+     * 11: Reserved
+     */
+	if (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC == 96000000) {
+		/* 96MHz -> /2 = 48MHz (Val 1: 01b) -> Set Bit 22, Clear Bit 23 */
+		RCC->CFGR0 = (RCC->CFGR0 & ~(1 << 23)) | (1 << 22);
+	} else if (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC == 72000000) {
+		/* 72MHz -> /1.5 = 48MHz (Val 2: 10b) -> Clear Bit 22, Set Bit 23 */
+		RCC->CFGR0 = (RCC->CFGR0 & ~(1 << 22)) | (1 << 23);
+	} else if (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC == 48000000) {
+		/* 48MHz -> /1 = 48MHz (Val 0: 00b) -> Clear Bit 22, Clear Bit 23 */
+		RCC->CFGR0 &= ~(3 << 22);
 	}
+#else
+    /* Standard CH32V103/STM32F103 behavior (Single Bit 22) */
+    /* 0: PLL/1.5, 1: PLL/1 */
+	if (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC == 48000000) {
+        RCC->CFGR0 |= (1 << 22);
+    } else {
+        RCC->CFGR0 &= ~(1 << 22);
+    }
+#endif
 
-	return 0;
-
-	printk("WCH Clock Init Done (SYSCLK=%u RCC_CFGR0=%08x USBPRE=%d)\n", 
-           WCH_RCC_SYSCLK, RCC->CFGR0, (RCC->CFGR0 >> 22) & 0x3);
-	printk("HSI TRIM=%02x CAL=%02x\n", (RCC->CTLR >> 3) & 0x1F, (RCC->CTLR >> 8) & 0xFF);
 	return 0;
 }
 

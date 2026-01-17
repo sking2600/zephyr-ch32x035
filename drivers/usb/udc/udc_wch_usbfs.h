@@ -295,12 +295,14 @@ enum usbfs_wch_event {
 	USBFS_WCH_OUT,
 	USBFS_WCH_IN,
 	USBFS_WCH_SOF,
+	USBFS_WCH_DEBUG,
 };
 
 struct usbfs_wch_msg {
-	enum usbfs_wch_event type;
+	uint8_t type;
 	uint8_t ep;
 	uint16_t rx_count;
+	uint32_t debug_val;
 };
 
 struct wch_usbfs_ep_state {
@@ -314,9 +316,14 @@ struct wch_usbfs_data {
 	struct k_thread thread_data;
 	struct k_msgq msgq;
 	char msgq_buf[8 * sizeof(struct usbfs_wch_msg)];
-	K_KERNEL_STACK_MEMBER(thread_stack, 1024);
+	K_KERNEL_STACK_MEMBER(thread_stack, 2048);
 	uint8_t ep0_dma_buf[256] __aligned(4);
 	uint8_t pending_address;
+	bool address_change_pending;
+	/* ISR control transfer state (like WCH EXAM globals) */
+	const uint8_t *isr_desc_ptr;  /* Pointer to remaining descriptor data */
+	uint16_t isr_setup_req_len;   /* Remaining bytes to send */
+	uint8_t isr_handling;         /* 1 if ISR is handling this control xfer */
 };
 
 struct wch_usbfs_config {
