@@ -17,7 +17,7 @@
 LOG_MODULE_REGISTER(comparator_wch, CONFIG_COMPARATOR_LOG_LEVEL);
 
 struct comparator_wch_config {
-	OPA_TypeDef *regs;
+	struct wch_opacmp_regs *regs;
 	uint8_t index;
 	uint8_t psel;
 	uint8_t nsel;
@@ -42,33 +42,29 @@ static int comparator_wch_set_trigger(const struct device *dev,
 				      enum comparator_trigger trigger)
 {
 	const struct comparator_wch_config *config = dev->config;
-	OPA_TypeDef *regs = config->regs;
+	struct wch_opacmp_regs *regs = config->regs;
 	uint32_t ctlr2;
 
 	ctlr2 = regs->CTLR2;
 
-	/* Wakeup/Trigger mode is in bits 24-25 of CTLR2 for whole block? 
-	 * For now, map to global wake-up mode as defined in SPL.
-	 */
-    
 	uint32_t mode = 0;
 	switch (trigger) {
 	case COMPARATOR_TRIGGER_NONE:
 		mode = 0;
 		break;
 	case COMPARATOR_TRIGGER_BOTH_EDGES:
-		mode = 1; // CMP_WakeUp_Rising_Falling
+		mode = 1; /* CMP_WakeUp_Rising_Falling */
 		break;
 	case COMPARATOR_TRIGGER_RISING_EDGE:
-		mode = 2; // CMP_WakeUp_Rising
+		mode = 2; /* CMP_WakeUp_Rising */
 		break;
 	case COMPARATOR_TRIGGER_FALLING_EDGE:
-		mode = 3; // CMP_WakeUp_Falling
+		mode = 3; /* CMP_WakeUp_Falling */
 		break;
 	}
 
-	ctlr2 &= ~(0x3 << 24);
-	ctlr2 |= (mode << 24);
+	ctlr2 &= ~CMP_CTLR2_WAKEUP_MASK;
+	ctlr2 |= (mode << CMP_CTLR2_WAKEUP_SHIFT);
 
 	regs->CTLR2 = ctlr2;
 
@@ -96,13 +92,13 @@ static const struct comparator_driver_api comparator_wch_api = {
 static int comparator_wch_init(const struct device *dev)
 {
 	const struct comparator_wch_config *config = dev->config;
-	OPA_TypeDef *regs = config->regs;
+	struct wch_opacmp_regs *regs = config->regs;
 	uint32_t ctlr2;
     uint8_t cmp_idx = config->index - 1;
 
 	ctlr2 = regs->CTLR2;
 
-	/* Configure CMP bits in CTLR2 
+	/* Configure CMP bits in CTLR2
 	 * Bits per CMP:
 	 * Enable [0] + idx*8
 	 * Mode   [1:2] + idx*8
@@ -111,9 +107,12 @@ static int comparator_wch_init(const struct device *dev)
 	 * HYEN   [5] + idx*8
 	 * LP     [6] + idx*8
 	 */
-	uint32_t mask = (0x7F << (cmp_idx * 8));
-	uint32_t val = (1 << 0) | (config->mode << 1) | (config->nsel << 3) | 
-                   (config->psel << 4) | (config->hyen << 5);
+	uint32_t mask = (CMP_CTLR2_ALL_MASK << (cmp_idx * 8));
+	uint32_t val = CMP_CTLR2_EN_MASK | 
+	               (config->mode << 1) | 
+	               (config->nsel << 3) | 
+	               (config->psel << 4) | 
+	               (config->hyen << 5);
 
 	ctlr2 &= ~mask;
 	ctlr2 |= (val << (cmp_idx * 8));
@@ -127,7 +126,7 @@ static int comparator_wch_init(const struct device *dev)
 	static struct comparator_wch_data comparator_wch_data_##n;                 \
                                                                                \
 	static const struct comparator_wch_config comparator_wch_config_##n = {    \
-		.regs = (OPA_TypeDef *)DT_REG_ADDR(DT_PARENT(DT_DRV_INST(n))),         \
+		.regs = (struct wch_opacmp_regs *)DT_REG_ADDR(DT_PARENT(DT_DRV_INST(n))), \
 		.index = DT_INST_PROP(n, index),                                       \
 		.psel = DT_INST_PROP_OR(n, wch_psel, 0),                               \
 		.nsel = DT_INST_PROP_OR(n, wch_nsel, 0),                               \

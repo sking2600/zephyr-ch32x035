@@ -19,13 +19,44 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(adc_wch);
 
-#define WCH_ADC_PGA_1X 0
-#define WCH_ADC_PGA_4X ADC_PGA_0
-#define WCH_ADC_PGA_16X ADC_PGA_1
-#define WCH_ADC_PGA_64X ADC_PGA
+/* Standard WCH ADC bits */
+#ifndef ADC_ADON
+#define ADC_ADON                BIT(0)
+#endif
 
-#define ADC_WCH_TIMEOUT_US 10000
-#define ADC_WCH_TIMEOUT_STEP_US 10
+#ifndef ADC_TSVREFE
+#define ADC_TSVREFE             BIT(23)
+#endif
+
+#ifndef ADC_RSWSTART
+#define ADC_RSWSTART            BIT(22)
+#endif
+
+#ifndef ADC_CTLR1_SCAN
+#define ADC_CTLR1_SCAN          BIT(8)
+#endif
+
+#ifndef ADC_CTLR2_DMA
+#define ADC_CTLR2_DMA           BIT(8)
+#endif
+
+#ifndef ADC_RSTCAL
+#define ADC_RSTCAL              BIT(3)
+#endif
+
+#ifndef ADC_CAL
+#define ADC_CAL                 BIT(2)
+#endif
+
+#ifndef ADC_L_0
+#define ADC_L_0                 BIT(20)
+#endif
+
+#define WCH_ADC_PGA_1X 0
+#define WCH_ADC_PGA_4X BIT(27)
+#define WCH_ADC_PGA_16X BIT(28)
+#define WCH_ADC_PGA_64X (BIT(27) | BIT(28))
+#define WCH_ADC_PGA_MASK (BIT(27) | BIT(28))
 
 struct adc_wch_config {
 	ADC_TypeDef *regs;
@@ -36,6 +67,7 @@ struct adc_wch_config {
 	const struct device *dma_dev;
 	uint32_t dma_chan;
 #endif
+    uint16_t vref_mv;
 };
 
 struct adc_wch_data {
@@ -110,6 +142,8 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 	int total_channels = 0;
 	int first_channel = -1;
 	int i;
+    int first_channel_id = -1;
+    uint32_t common_pga = 0;
 	uint16_t *samples = sequence->buffer;
 
 	if (sequence->options != NULL) {
@@ -123,10 +157,7 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 		return -EINVAL;
 	}
 
-	/*
-	 * Build the sample sequence. The channel IDs are packed 5 bits at a time starting in RSQR3
-	 * and working down in memory to RSQR1.
-	 */
+	/* RSQR registers setup */
 	regs->RSQR1 = 0;
 	regs->RSQR2 = 0;
 	regs->RSQR3 = 0;
@@ -138,11 +169,8 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 			}
 			(&regs->RSQR1)[rsqr] |= i << sequence_id;
 			total_channels++;
-			/* Each channel ID is 5 bits wide */
 			sequence_id += 5;
-			/* Each sequence register can hold 6 x 5 bit channel IDs */
 			if (sequence_id >= 30) {
-				/* Move on to the next RSQRn register, i.e. RSQR(n-1) */
 				sequence_id = 0;
 				rsqr--;
 			}
@@ -153,64 +181,31 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 		return 0;
 	}
 
+    /* Validate that all channels in the sequence have the same gain */
+    /* Hardware has a single global PGA setting in CTLR2 */
+    for (i = 0; i < 18; i++) {
+        if ((sequence->channels & BIT(i)) != 0) {
+             if (first_channel_id == -1) {
+                 first_channel_id = i;
+                 common_pga = data->gain[i];
+             } else {
+                 if (data->gain[i] != common_pga) {
+                     LOG_ERR("All channels in sequence must have same gain");
+                     return -ENOTSUP;
+                 }
+             }
+        }
+    }
+    
+    /* Apply Gain */
+    regs->CTLR2 = (regs->CTLR2 & ~WCH_ADC_PGA_MASK) | common_pga;
+
 	if (sequence->buffer_size < total_channels * sizeof(*samples)) {
 		return -ENOMEM;
 	}
-    
-    /* 1. Stop DMA and Clear Flags */
+
 #ifdef CONFIG_ADC_WCH_DMA
 	if (config->dma_dev != NULL) {
-		dma_stop(config->dma_dev, config->dma_chan);
-        /* Manual clear of DMA flags */
-        regs->CTLR2 &= ~ADC_DMA;
-        volatile uint32_t *dma_intfcr = (uint32_t *)0x40020004;
-        *dma_intfcr = (0xF << (4 * config->dma_chan));
-	}
-#endif
-
-    /* 2. Clear Flags, Reset FIFO, and Ensure ADC Enabled */
-	regs->STATR = 0;
-	regs->CFG &= ~ADC_FIFO_EN;
-	
-	/* Ensure ADON is set (it should be from init, but standard practice is to verify) */
-	if (!(regs->CTLR2 & ADC_ADON)) {
-		regs->CTLR2 |= (ADC_ADON | ADC_TSVREFE);
-		/* T<sub>STAB</sub> is approx 1us per datasheet, give it plenty */
-		k_busy_wait(10);
-	}
-    
-    /* NO CALIBRATION HERE (It causes shadowing) */
-    
-	regs->CFG |= ADC_FIFO_EN;
-
-	/* Set the number of channels to read. Note that '0' means 'one channel'. */
-	regs->RSQR1 |= (total_channels - 1) * ADC_L_0;
-
-    /* 3. Configure Scan Mode */
-	if (total_channels > 1) {
-		regs->CTLR1 |= ADC_SCAN;
-	} else {
-		regs->CTLR1 &= ~ADC_SCAN;
-	}
-    /* Disable ADC internal buffer */
-    regs->CTLR1 &= ~(1 << 26);
-
-	/* Apply PGA gain from the first channel */
-#if defined(ADC_PGA) || defined(ADC_CTLR1_PGA)
-	if (first_channel >= 0) {
-		uint32_t ctlr1 = regs->CTLR1;
-#if defined(ADC_PGA)
-		ctlr1 &= ~ADC_PGA;
-#else
-		ctlr1 &= ~ADC_CTLR1_PGA;
-#endif
-		ctlr1 |= data->gain[first_channel];
-		regs->CTLR1 = ctlr1;
-	}
-#endif
-
-#ifdef CONFIG_ADC_WCH_DMA
-	if (config->dma_dev != NULL && sequence->buffer != NULL) {
 		struct adc_wch_dma_ctx dma_ctx;
 		struct dma_config dma_cfg = {0};
 		struct dma_block_config dma_blk = {0};
@@ -239,38 +234,37 @@ static int adc_wch_read(const struct device *dev, const struct adc_sequence *seq
 			return err;
 		}
 
-		regs->CTLR2 |= ADC_DMA;
+		regs->CTLR2 |= ADC_CTLR2_DMA;
 		
 		err = dma_start(config->dma_dev, config->dma_chan);
 		if (err != 0) {
 			return err;
 		}
 
-		regs->STATR = 0; /* Clear flags before trigger */
-		k_busy_wait(10);
+		regs->STATR = 0;
 		regs->CTLR2 |= ADC_RSWSTART;
 
-		/* Wait for completion - Accept Timeout if it happens */
 		if (k_sem_take(&dma_ctx.sem, K_MSEC(100)) != 0) {
-            extern void sdi_console_printf(const char *format, ...);
-			sdi_console_printf("ADC DMA Timeout | STATR: 0x%08X\n", regs->STATR);
-			regs->CTLR2 &= ~ADC_DMA;
-			regs->STATR = 0;
+			regs->CTLR2 &= ~ADC_CTLR2_DMA;
 			dma_stop(config->dma_dev, config->dma_chan);
 			return -EIO;
 		}
 
-		/* Success path: Normal cleanup */
-		regs->CTLR2 &= ~ADC_DMA;
-		regs->STATR = 0; 
+		regs->CTLR2 &= ~ADC_CTLR2_DMA;
 		dma_stop(config->dma_dev, config->dma_chan);
 
 		return dma_ctx.status;
 	}
 #endif
 
-    /* (INT-driven fallback omitted for brevity, assuming DMA is ON) */
-    return -ENOTSUP;
+	/* Fallback to software-triggered read if DMA is disabled */
+	for (i = 0; i < total_channels; i++) {
+		regs->CTLR2 |= ADC_RSWSTART;
+		while (!(regs->STATR & (1 << 1))); /* WAIT EOC */
+		*samples++ = (uint16_t)regs->RDATAR;
+	}
+
+	return 0;
 }
 
 static int adc_wch_init(const struct device *dev)
@@ -278,8 +272,7 @@ static int adc_wch_init(const struct device *dev)
 	struct adc_wch_config *config = (struct adc_wch_config *)dev->config;
 	ADC_TypeDef *regs = config->regs;
 	int err;
-
-	LOG_INF("WCH ADC driver init");
+    int i;
 
 	clock_control_on(config->clock_dev, (clock_control_subsys_t)(uintptr_t)config->clock_id);
 
@@ -288,70 +281,21 @@ static int adc_wch_init(const struct device *dev)
 		return err;
 	}
 
-	/*
-	 * Ensure ADC Clock Prescaler is correct for 72MHz System Clock.
-	 * Default is /2 (36MHz) which exceeds max 14MHz.
-	 * Set to /8 (9MHz) via RCC->CFGR0[15:14] = 11b.
-	 */
-	RCC_TypeDef *rcc = (RCC_TypeDef *)0x40021000;
-	rcc->CFGR0 |= (3 << 14);
+	/* Ensure ADON is set */
+	regs->CTLR2 |= ADC_ADON;
 
-	/*
-	 * The default sampling time is 3 cycles and shows coupling between channels. Use 15 cycles
-	 * instead. Arbitrary.
-	 */
-	/* 
-	 * Use a long sampling time for all channels (241.5 cycles) to ensure stability,
-	 * especially for internal temperature and VREF sensors.
-	 */
-	regs->SAMPTR1 = 0x3FFFFFFF;
-	regs->SAMPTR2 = 0x3FFFFFFF;
-
-	regs->CTLR2 = ADC_ADON | ADC_TSVREFE;
-
-	/* CH32L103: Enable ADC FIFO - requires FLASH unlock sequence first (per EVT example) */
-#if defined(ADC_FIFO_EN)
-	{
-		/* FLASH unlock sequence for ADC FIFO access */
-		volatile uint32_t *FLASH_KEYR = (volatile uint32_t *)0x40022004;
-		volatile uint32_t *FLASH_MODEKEYR = (volatile uint32_t *)0x40022024;
-		volatile uint32_t *FLASH_OBKEYR = (volatile uint32_t *)0x40022008;
-		volatile uint32_t *FLASH_CTRL = (volatile uint32_t *)0x40022034;
-		volatile uint32_t *FLASH_CFGR = (volatile uint32_t *)0x4002202C;
-
-		*FLASH_KEYR = 0x45670123; /* KEY1 */
-		*FLASH_KEYR = 0xCDEF89AB; /* KEY2 */
-		*FLASH_MODEKEYR = 0x45670123; /* KEY1 */
-		*FLASH_OBKEYR = 0xCDEF89AB; /* KEY2 */
-		while ((*FLASH_CTRL) & (1 << 29)); /* Wait unlock */
-
-		*FLASH_CFGR |= (1 << 9); /* offset calibration */
-		*FLASH_CTRL |= (1 << 29); /* lock */
-		while (((*FLASH_CTRL) & (1 << 29)) == 0); /* wait lock */
-
-		/* Now enable FIFO */
-		regs->CFG |= ADC_FIFO_EN;
-	}
-#endif
-
-	/* CH32L103: Disable ADC buffer (per EVT example - CTLR1 bit 26) */
-	regs->CTLR1 &= ~(1 << 26);
-
-	/* Brief delay after power-up and config */
-	k_msleep(10);
-
-#if defined(ADC_PGA)
-	/* Default to Gain 1x if supported */
-	regs->CTLR1 &= ~ADC_PGA;
-#elif defined(ADC_CTLR1_PGA)
-	regs->CTLR1 &= ~ADC_CTLR1_PGA;
-#endif
-
-	/* One-time calibration at boot for stability */
+	/* Calibration */
 	regs->CTLR2 |= ADC_RSTCAL;
-	while (regs->CTLR2 & ADC_RSTCAL) k_busy_wait(10);
-	regs->CTLR2 |= ADC_CAL;
-	while (regs->CTLR2 & ADC_CAL) k_busy_wait(10);
+	for (i = 0; i < 10000; i++) {
+        if (!(regs->CTLR2 & ADC_RSTCAL)) break;
+        k_busy_wait(1);
+    }
+	
+    regs->CTLR2 |= ADC_CAL;
+	for (i = 0; i < 10000; i++) {
+        if (!(regs->CTLR2 & ADC_CAL)) break;
+        k_busy_wait(1);
+    }
 
 	return 0;
 }
@@ -385,36 +329,36 @@ static int adc_wch_pm_action(const struct device *dev, enum pm_device_action act
 }
 #endif
 
-
 #ifdef CONFIG_ADC_WCH_DMA
 #define ADC_WCH_DMA_NODE(n)						\
 	COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas),			\
 		(.dma_dev = DEVICE_DT_GET(DT_INST_DMAS_CTLR(n)),	\
 		 .dma_chan = DT_INST_DMAS_CELL_BY_IDX(n, 0, channel),),		\
-		())
+		)
 #else
 #define ADC_WCH_DMA_NODE(n)
 #endif
 
 #define ADC_WCH_DEVICE(n)                                                                     \
 	PINCTRL_DT_INST_DEFINE(n);                                                                 \
-                                                                                                   \
-	static DEVICE_API(adc, adc_wch_api_##n) = {                                           \
+                                                                                                    \
+	static const struct adc_driver_api adc_wch_api_##n = {                                 \
 		.channel_setup = adc_wch_channel_setup,                                       \
 		.read = adc_wch_read,                                                         \
-		.ref_internal = DT_INST_PROP(n, vref_mv),                                          \
+		.ref_internal = DT_INST_PROP_OR(n, vref_mv, 3300),                            \
 	};                                                                                         \
-                                                                                                   \
+                                                                                                    \
 	static struct adc_wch_data adc_wch_data_##n;                                         \
-                                                                                                   \
+                                                                                                    \
 	static const struct adc_wch_config adc_wch_config_##n = {                        \
 		.regs = (ADC_TypeDef *)DT_INST_REG_ADDR(n),                                        \
 		.pin_cfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),                                      \
 		.clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                                \
 		.clock_id = DT_INST_CLOCKS_CELL(n, id),                                            \
+		.vref_mv = DT_INST_PROP_OR(n, vref_mv, 3300),                                      \
 		ADC_WCH_DMA_NODE(n)								   \
 	};                                                                                         \
-                                                                                                   \
+                                                                                                    \
 	PM_DEVICE_DT_INST_DEFINE(n, adc_wch_pm_action);                                            \
 	DEVICE_DT_INST_DEFINE(n, adc_wch_init, PM_DEVICE_DT_INST_GET(n), &adc_wch_data_##n, &adc_wch_config_##n, \
 			      POST_KERNEL, CONFIG_ADC_INIT_PRIORITY, &adc_wch_api_##n);

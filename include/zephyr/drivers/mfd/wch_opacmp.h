@@ -55,6 +55,21 @@ struct wch_opacmp_regs {
 /* PSEL (Positive Input) Enumerations */
 #define OPA_PSEL_CHP0           0  /* PA7 for OPA1? Check datasheet */
 #define OPA_PSEL_CHP1           1
-/* Add more as needed based on specific OPA instance */
+
+/* CMP Control Register 2 (CTLR2) Bits partial definitions per CMP instance */
+/* Each CMP occupies 8 bits: [0]=EN, [1:2]=MODE, [3]=NSEL, [4]=PSEL, [5]=HYEN, [6]=LP */
+#define CMP_CTLR2_EN_MASK       BIT(0)
+#define CMP_CTLR2_MODE_MASK     (BIT(1) | BIT(2))
+#define CMP_CTLR2_NSEL_MASK     BIT(3)
+#define CMP_CTLR2_PSEL_MASK     BIT(4)
+#define CMP_CTLR2_HYEN_MASK     BIT(5)
+#define CMP_CTLR2_LP_MASK       BIT(6)
+/* Full 8-bit mask for one CMP instance */
+#define CMP_CTLR2_ALL_MASK      0x7F
+
+/* Global CTLR2 bits */
+#define CMP_CTLR2_WAKEUP_MASK   (BIT(24) | BIT(25))
+#define CMP_CTLR2_WAKEUP_SHIFT  24
+#define CMP_CTLR2_LOCK          BIT(31)
 
 #endif /* ZEPHYR_INCLUDE_DRIVERS_MFD_WCH_OPACMP_H_ */

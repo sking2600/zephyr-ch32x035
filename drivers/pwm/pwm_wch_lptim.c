@@ -9,12 +9,34 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/pwm.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/pinctrl.h>
 #include <hal_ch32fun.h>
+
+/* LPTIM_CFGR bits */
+#define LPTIM_CFGR_WAVE         BIT(20)
+#define LPTIM_CFGR_POLARITY     BIT(21)
+#define LPTIM_CFGR_PRELOAD      BIT(22)
+/* Prescaler /128 is 111b at offset 9 */
+#define LPTIM_CFGR_PSC_128      (0x7 << 9)
+
+/* LPTIM_CR bits */
+#define LPTIM_CR_ENABLE         BIT(0)
+#define LPTIM_CR_CNTSTRT        BIT(2)
+#define LPTIM_CR_OUTEN          BIT(3)
+
+/* LPTIM_ISR bits */
+#define LPTIM_ISR_CMPOK         BIT(3)
+#define LPTIM_ISR_ARROK         BIT(4)
+
+/* LPTIM_ICR bits */
+#define LPTIM_ICR_CMPOKCF       BIT(3)
+#define LPTIM_ICR_ARROKCF       BIT(4)
 
 struct pwm_lptim_config {
 	LPTIM_TypeDef *regs;
 	const struct device *clock_dev;
 	uint16_t clock_id;
+	const struct pinctrl_dev_config *pin_cfg;
 };
 
 struct pwm_lptim_data {
@@ -51,11 +73,19 @@ static int pwm_lptim_set_cycles(const struct device *dev, uint32_t channel,
 	 * Continuous mode will be set in CR via CNTSTRT
 	 * TIMOUT disabled as per example
 	 */
-	config->regs->CFGR = LPTIM_CFGR_WAVE | LPTIM_CFGR_PRELOAD | (7 << 9); /* PSC = /128 */
+	/* Configure for PWM mode
+	 * WAVE (bit 20): PWM mode
+	 * PRELOAD (bit 22): Enable preload for glitch-free updates
+	 * Internal clock source (bits 25-26): 00 = PCLK1
+	 * Prescaler: /128 (bits 9-11): 111 = /128
+	 * Continuous mode will be set in CR via CNTSTRT
+	 * TIMOUT disabled as per example
+	 */
+	config->regs->CFGR = LPTIM_CFGR_WAVE | LPTIM_CFGR_PRELOAD | LPTIM_CFGR_PSC_128;
 
 	/* Apply polarity */
 	if (flags & PWM_POLARITY_INVERTED) {
-		config->regs->CFGR |= LPTIM_CFGR_WAVPOL;
+		config->regs->CFGR |= LPTIM_CFGR_POLARITY; /* WAVPOL */
 	}
 
 	/* Enable LPTIM */
@@ -65,18 +95,23 @@ static int pwm_lptim_set_cycles(const struct device *dev, uint32_t channel,
 	config->regs->ARR = (uint16_t)(period_cycles - 1);
 
 	/* Wait for ARROK */
-	uint32_t timeout = 100000;
-	while (!(config->regs->ISR & LPTIM_ISR_ARROK) && timeout--);
+	uint32_t timeout = 1000;
+	while (!(config->regs->ISR & LPTIM_ISR_ARROK) && timeout--) {
+        k_busy_wait(1);
+    }
 	config->regs->ICR |= LPTIM_ICR_ARROKCF;
 
 	/* Set pulse width (CMP) */
 	config->regs->CMP = (uint16_t)pulse_cycles;
 
 	/* Wait for CMPOK */
-	timeout = 100000;
-	while (!(config->regs->ISR & LPTIM_ISR_CMPOK) && timeout--);
+	timeout = 1000;
+	while (!(config->regs->ISR & LPTIM_ISR_CMPOK) && timeout--) {
+        k_busy_wait(1);
+    }
 	config->regs->ICR |= LPTIM_ICR_CMPOKCF;
 
+	/* Enable PWM output and start continuous mode */
 	/* Enable PWM output and start continuous mode */
 	config->regs->CR |= LPTIM_CR_OUTEN | LPTIM_CR_CNTSTRT;
 
@@ -120,16 +155,10 @@ static int pwm_lptim_init(const struct device *dev)
 		return err;
 	}
 
-	/* Configure PB15 as alternate function for LPTIM output */
-	/* Enable GPIOB and AFIO clock */
-	RCC->APB2PCENR |= RCC_PB2Periph_GPIOB | RCC_PB2Periph_AFIO;
-
-	/* Ensure LPTIM is not remapped (Default: PB15) */
-	AFIO->PCFR2 &= ~AFIO_PCFR2_LPTIM_RM;
-	
-	/* Configure PB15 as AF push-pull */
-	GPIOB->CFGHR &= ~(0xF << ((15 - 8) * 4));
-	GPIOB->CFGHR |= (0xB << ((15 - 8) * 4)); /* AF push-pull, 50MHz */
+	err = pinctrl_apply_state(config->pin_cfg, PINCTRL_STATE_DEFAULT);
+	if (err != 0) {
+		return err;
+	}
 
 	return 0;
 }
@@ -140,11 +169,13 @@ static const struct pwm_driver_api pwm_lptim_driver_api = {
 };
 
 #define PWM_LPTIM_INIT(n)							\
+	PINCTRL_DT_INST_DEFINE(n);						\
 										\
 	static const struct pwm_lptim_config pwm_lptim_config_##n = {		\
 		.regs = (LPTIM_TypeDef *)DT_REG_ADDR(DT_INST_PARENT(n)),	\
 		.clock_dev = DEVICE_DT_GET(DT_CLOCKS_CTLR(DT_INST_PARENT(n))),	\
 		.clock_id = DT_CLOCKS_CELL(DT_INST_PARENT(n), id),		\
+		.pin_cfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),			\
 	};									\
 										\
 	static struct pwm_lptim_data pwm_lptim_data_##n;			\

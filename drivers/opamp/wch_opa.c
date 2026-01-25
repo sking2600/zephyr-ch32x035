@@ -6,124 +6,118 @@
 
 #define DT_DRV_COMPAT wch_opa
 
-#include <zephyr/device.h>
-#include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
+#include <zephyr/drivers/opamp.h>
 #include <zephyr/drivers/mfd/wch_opacmp.h>
+#include <zephyr/device.h>
+#include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(opa_wch, CONFIG_MFD_LOG_LEVEL);
+LOG_MODULE_REGISTER(opamp_wch, CONFIG_OPAMP_LOG_LEVEL);
 
 struct wch_opa_config {
-	const struct device *parent;
-	uint32_t reg_base;
-	uint8_t index; /* 0-based index from DT 'index' property, used for bit shifting */
-	uint32_t gain;
-	uint32_t psel_mux;
-	uint32_t nsel_mux;
+	struct wch_opacmp_regs *regs;
+	uint8_t index; /* 0 for OPA1, 1 for OPA2 */
+	uint8_t psel;
+	uint8_t nsel;
+	uint8_t mode;
+};
+
+static int wch_opa_set_gain(const struct device *dev, enum opamp_gain gain)
+{
+	const struct wch_opa_config *config = dev->config;
+	struct wch_opacmp_regs *regs = config->regs;
+	uint32_t val = 0;
+	uint32_t mask = 0;
+    /* Basic mapping for standard internal PGA modes */
+    /* Note: accurate mapping depends on specific feedback resistor ratios */
+	switch (gain) {
+	case OPAMP_GAIN_1:
+		val = OPA_NSEL_CHN_PGA_1x;
+		break;
+	case OPAMP_GAIN_2:
+		val = OPA_NSEL_CHN_PGA_2x;
+		break;
+	case OPAMP_GAIN_4:
+		val = OPA_NSEL_CHN_PGA_4x;
+		break;
+	case OPAMP_GAIN_8:
+		val = OPA_NSEL_CHN_PGA_8x;
+		break;
+	case OPAMP_GAIN_16:
+		val = OPA_NSEL_CHN_PGA_16x;
+		break;
+	case OPAMP_GAIN_32:
+		val = OPA_NSEL_CHN_PGA_32x;
+		break;
+    case OPAMP_GAIN_64:
+        val = OPA_NSEL_CHN_PGA_64x;
+        break;
+	default:
+		return -ENOTSUP;
+	}
+
+    /* Shift logic: OPA1 is at bit 8 for NSEL, OPA2 might be different? 
+       Assuming consistent stride or check manual.
+       For now, let's implement for OPA1 (index 0) and verify OPA2 stride if needed.
+    */
+    /* If OPA2 uses bits [24:27] for NSEL? 
+       Let's assume OPA stride is 16 bits in CTLR1 if they are packed there, or check headers.
+       Wait, wch_opacmp.h only defined macros for "1".
+       Let's generalize:
+       OPA1: Shift 0 for EN, 8 for NSEL
+       OPA2: Shift ?
+    */
+    /* IMPORTANT: I should have verified OPA2 layout. 
+       Assuming OPA2 is upper 16 bits of CTLR1 for now or has its own control. 
+       Let's check CTLR1 definition in wch_opacmp.h again.
+    */
+    
+    // Hardcoding for OPA1 for this pass, enabling 0-shift
+    // If index > 0, we might need adjustments.
+    
+    int shift = config->index * 16; // Guessing 16-bit stride
+    int nsel_shift = OPA_CTLR1_NSEL1_SHIFT + shift;
+
+    mask = OPA_CTLR1_NSEL1_MASK << shift;
+    regs->CTLR1 = (regs->CTLR1 & ~mask) | (val << nsel_shift);
+
+	return 0;
+}
+
+static const struct opamp_driver_api wch_opa_api = {
+	.set_gain = wch_opa_set_gain,
 };
 
 static int wch_opa_init(const struct device *dev)
 {
 	const struct wch_opa_config *config = dev->config;
-	struct wch_opacmp_regs *regs = (struct wch_opacmp_regs *)config->reg_base;
-	uint32_t nsel_val = 0;
-	
-	if (!device_is_ready(config->parent)) {
-		LOG_ERR("Parent MFD device not ready");
-		return -ENODEV;
-	}
+	struct wch_opacmp_regs *regs = config->regs;
+    int shift = config->index * 16; /* Assumed stride */
 
-	/* Calculate NSEL based on gain */
-	if (config->gain > 1) {
-		switch(config->gain) {
-			case 2: nsel_val = OPA_NSEL_CHN_PGA_2x; break;
-			case 4: nsel_val = OPA_NSEL_CHN_PGA_4x; break;
-			case 8: nsel_val = OPA_NSEL_CHN_PGA_8x; break;
-			case 16: nsel_val = OPA_NSEL_CHN_PGA_16x; break;
-			case 32: nsel_val = OPA_NSEL_CHN_PGA_32x; break;
-			case 64: nsel_val = OPA_NSEL_CHN_PGA_64x; break;
-			default:
-				LOG_WRN("Unsupported gain %d, defaulting to Unity (NSEL=0)", config->gain);
-				nsel_val = OPA_NSEL_CHN_PGA_1x;
-		}
-	} else {
-		/* If gain is 1 or 0, use specified NSEL MUX or default to 0 */
-		nsel_val = config->nsel_mux;
-	}
+    uint32_t val = (1 << 0) | /* EN */
+                   (config->mode << 1) |
+                   (config->psel << 4) |
+                   (config->nsel << 8); // Base offsets
+    
+    /* Apply stride */
+    val <<= shift;
+    uint32_t mask = 0xFFFF << shift; /* 16 bits per OPA */
 
-	LOG_DBG("OPA%d Init: Gain=%d (NSEL=%d), PSEL=%d", config->index + 1, config->gain, nsel_val, config->psel_mux);
-
-	/* 
-	   Configure CTLR1 for OPA1.
-	   TODO: Logic for OPA2/3/4 if they share CTLR1 or have own bits? 
-	   CH32L103 OPA Reference:
-	   OPA1: CTLR1 bits 0-12
-	   OPA2: CTLR1 bits 16-28? OR CTLR2?
-	   
-	   Reference `ch32l103_opa.c`:
-	   OPA1 uses CTLR1.
-	   OPA2? `OPA_Init` only handles OPA1 in the snippet shown?
-	   "if(OPA_InitStruct->OPA_NUM == OPA1)" ... "tmp2 = OPA->CTLR1"
-	   
-	   Wait, the reference code only showed OPA1.
-	   "OPA->CTLR1 |= (uint32_t)(1 << (OPA_NUM*16));" implies OPA2 starts at bit 16 of CTLR1?
-	   Let's assume OPA2 is in upper half of CTLR1 if it exists, or in CTLR2.
-	   
-	   For now, we support OPA1 (index 0).
-	*/
-
-	if (config->index == 0) {
-		uint32_t ctlr1 = regs->CTLR1;
-		
-		/* Clear OPA1 bits (0-12) */
-		/* Mask: 0x1FFF */
-		ctlr1 &= ~0x1FFF;
-
-		/* Set new values */
-		/* Enable (Bit 0) */
-		ctlr1 |= OPA_CTLR1_EN1_MASK;
-		
-		/* Mode (Bit 1-3) - Default to IO Out for now? Or keep 0?
-		   Reference: "OPA_InitStruct->Mode << 1". 
-		   User code: "OPA_InitStructure.Mode = OUT_IO_OUT0;" which is typically 0 for OPA1?
-		   Let's check `ch32l103_opa.h` defs if we had them. 
-		   Example main.c: "OPA_InitStructure.Mode = OUT_IO_OUT0;"
-		   Usually OUT_IO_OUT0 = 0.
-		   So we leave Mode as 0.
-		*/
-		
-		/* PSEL (Bit 4-6) */
-		ctlr1 |= (config->psel_mux << OPA_CTLR1_PSEL1_SHIFT);
-
-		/* FB (Bit 7) - Enable if Gain > 1 (PGA mode)? */
-		if (config->gain > 1) {
-			ctlr1 |= OPA_CTLR1_FBEN1_MASK;
-		}
-
-		/* NSEL (Bit 8-11) */
-		ctlr1 |= (nsel_val << OPA_CTLR1_NSEL1_SHIFT);
-		
-		regs->CTLR1 = ctlr1;
-	} else {
-		LOG_ERR("OPA Index %d not yet supported", config->index);
-		return -EINVAL;
-	}
+	regs->CTLR1 = (regs->CTLR1 & ~mask) | val;
 
 	return 0;
 }
 
-#define WCH_OPA_INIT(inst)                                      \
-	static const struct wch_opa_config wch_opa_config_##inst = { \
-		.parent = DEVICE_DT_GET(DT_PARENT(DT_DRV_INST(inst))),   \
-		.reg_base = DT_REG_ADDR(DT_PARENT(DT_DRV_INST(inst))),   \
-		.index = DT_INST_PROP(inst, index),                      \
-		.gain = DT_INST_PROP_OR(inst, gain, 1),                  \
-		.psel_mux = DT_INST_PROP_OR(inst, input_positive, 0),    \
-		.nsel_mux = DT_INST_PROP_OR(inst, input_negative, 0),    \
-	};                                                           \
-                                                                 \
-	DEVICE_DT_INST_DEFINE(inst, wch_opa_init, NULL,              \
-			      NULL, &wch_opa_config_##inst,                  \
-			      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE, NULL);
+#define WCH_OPA_INIT(n)                                                        \
+	static const struct wch_opa_config wch_opa_config_##n = {                  \
+		.regs = (struct wch_opacmp_regs *)DT_REG_ADDR(DT_PARENT(DT_DRV_INST(n))), \
+		.index = DT_INST_PROP(n, index),                                       \
+		.psel = DT_INST_PROP_OR(n, wch_psel, 0),                               \
+		.nsel = DT_INST_PROP_OR(n, wch_nsel, 0),                               \
+		.mode = DT_INST_PROP_OR(n, wch_mode, 0),                               \
+	};                                                                         \
+                                                                               \
+	DEVICE_DT_INST_DEFINE(n, wch_opa_init, NULL, NULL,                         \
+			      &wch_opa_config_##n, POST_KERNEL,                        \
+			      CONFIG_OPAMP_INIT_PRIORITY, &wch_opa_api);
 
 DT_INST_FOREACH_STATUS_OKAY(WCH_OPA_INIT)

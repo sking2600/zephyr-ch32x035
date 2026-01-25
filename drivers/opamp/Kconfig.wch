@@ -1,10 +1,9 @@
-# Copyright (c) 2026 Scott King
-# SPDX-License-Identifier: Apache-2.0
+# WCH Op-Amp configuration options
 
 config OPAMP_WCH
 	bool "WCH Op-Amp driver"
 	default y
 	depends on DT_HAS_WCH_OPA_ENABLED
-	select MFD_WCH_OPACMP
+    select MFD_WCH_OPACMP
 	help
-	  Enable the WCH Op-Amp driver.
+	  Enable Op-Amp driver for WCH.

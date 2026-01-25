@@ -27,6 +27,8 @@ SECTION_FUNC(vectors, ivt)
 	.endr
 
 SECTION_FUNC(vectors, __start)
-	li 	a0, 0xf
+	/* WCH Special: mtvec bits 1:0 = 11 for hardware stack + vectored mode */
+	la 	a0, ivt
+	ori	a0, a0, 3
 	csrw	mtvec, a0
 	j	__initialize

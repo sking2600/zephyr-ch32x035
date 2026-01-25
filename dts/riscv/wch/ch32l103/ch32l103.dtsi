@@ -406,7 +406,7 @@
 
 
 		usbpd: usbpd@40027000 {
-			compatible = "wch,ch32-usbpd";
+			compatible = "wch,ch32-ucpd";
 			reg = <0x40027000 0x400>;
 			interrupt-parent = <&pfic>;
 			interrupts = <65>;
